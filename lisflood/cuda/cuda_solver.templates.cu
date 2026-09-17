@@ -126,19 +126,24 @@ elements(lis::GhostRaster::elements_H(geometry))
 }
 
 template<typename F>
-NUMERIC_TYPE lis::cuda::DynamicTimestep<F>::update_dt()
+void lis::cuda::DynamicTimestep<F>::update_dt_async(cudaStream_t stream)
 {
 	if (adaptive)
 	{
 		auto& U = solver.d_U();
-		lis::cuda::update_dt_block_min<F><<<reduction_elements, CUDA_BLOCK_SIZE>>>(
+		lis::cuda::update_dt_block_min<F><<<reduction_elements, CUDA_BLOCK_SIZE, 0, stream>>>(
 				dt_field, U, elements);
 		checkCudaErrors(cudaPeekAtLastError());
 		checkCudaErrors(cub::DeviceReduce::Min(d_temp, bytes,
-					dt_field, &dt, reduction_elements));
+					dt_field, &dt, reduction_elements, stream));
 	}
-	cuda::sync();
+}
 
+template<typename F>
+NUMERIC_TYPE lis::cuda::DynamicTimestep<F>::update_dt()
+{
+	update_dt_async(0);
+	cuda::sync();
 	return dt;
 }
 
