@@ -30,6 +30,11 @@ public:
 
 	MassStats* instantaneous_mass();
 
+	NUMERIC_TYPE volume
+	(
+		NUMERIC_TYPE* H
+	);
+
 	~StatsCollector();
 
 	NUMERIC_TYPE previous_volume = C(0.0);
@@ -37,11 +42,6 @@ public:
 
 private:
 	NUMERIC_TYPE area
-	(
-		NUMERIC_TYPE* H
-	);
-
-	NUMERIC_TYPE volume
 	(
 		NUMERIC_TYPE* H
 	);
