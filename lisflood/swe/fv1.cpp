@@ -204,7 +204,7 @@ void fv1::update_point_sources
 		case HFIX2:
 			{
 				NUMERIC_TYPE Z = Arrptr->DEM[j*Parptr->xsz + i];
-				NUMERIC_TYPE H_new = FMIN(C(0.0), BCptr->PS_Val[ps_i] - Z);
+				NUMERIC_TYPE H_new = FMAX(C(0.0), BCptr->PS_Val[ps_i] - Z);
 				NUMERIC_TYPE Q = (H_new - H)*Parptr->dA / Solverptr->Tstep;
 				H = H_new;	
 
@@ -523,7 +523,7 @@ void fv1::set_boundary_values
 	case FREE1:
 		H_outside = H_inside;
 		HU_outside = HU_inside;
-		HV_outside = HV_outside;
+		HV_outside = HV_inside;
 		break;
 	case HFIX2:
 		{

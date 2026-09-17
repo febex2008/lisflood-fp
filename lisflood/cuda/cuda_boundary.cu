@@ -112,7 +112,7 @@ __global__ void update_point_sources
 		case HVAR3:
 			{
 				NUMERIC_TYPE Z = DEM[cuda::boundaries.PS_idx[i]];
-				NUMERIC_TYPE H_new = FMIN(C(0.0),
+				NUMERIC_TYPE H_new = FMAX(C(0.0),
 						cuda::boundaries.PS_value[i] - Z);
 				NUMERIC_TYPE discharge = (H_new - Hvalue)
 					* cuda::geometry.dx*cuda::geometry.dy / cuda::dt;
