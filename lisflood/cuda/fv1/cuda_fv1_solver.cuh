@@ -33,10 +33,10 @@ public:
 
 	void zero_ghost_cells();
 
-	void update_ghost_cells();
+	void update_ghost_cells() { update_ghost_cells(0); }
 	void update_ghost_cells(cudaStream_t stream);
 	
-	void update_uniform_rain(NUMERIC_TYPE rain_rate);
+	void update_uniform_rain(NUMERIC_TYPE rain_rate) { update_uniform_rain(rain_rate, 0); }
 	void update_uniform_rain(NUMERIC_TYPE rain_rate, cudaStream_t stream);
 
 	void updateMaxFieldACC(NUMERIC_TYPE t);
@@ -44,7 +44,7 @@ public:
 	Flow& update_flow_variables
 	(
 		MassStats* mass_stats
-	);
+	) { return update_flow_variables(mass_stats, 0); }
 	Flow& update_flow_variables
 	(
 		MassStats* mass_stats,
