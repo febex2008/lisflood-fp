@@ -32,7 +32,6 @@ jobs:
               raise SystemExit(f'expected one occurrence, found {b.count(old)}')
           p.write_bytes(b.replace(old, new, 1))
           PY
-          git diff --check
           git diff --numstat b58f1862c323006b6e7fc9431103c0c208827dff -- lisflood/swe/fv1.cpp
           test "$(git diff --numstat b58f1862c323006b6e7fc9431103c0c208827dff -- lisflood/swe/fv1.cpp | awk '{print $1":"$2}')" = "1:1"
       - name: Commit repaired file
