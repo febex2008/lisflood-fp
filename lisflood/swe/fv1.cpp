@@ -76,7 +76,7 @@ void fv1::solve
                 write_depth_samples(Fptr, Parptr, Solverptr, Stageptr, Arrptr);
                 if (Statesptr->voutput_stage == ON)
                 {
-					write_speed_samples(Fptr, Parptr, Solverptr, Stageptr, Arrptr);
+                    write_speed_samples(Fptr, Parptr, Solverptr, Stageptr, Arrptr);
                 }
             }
 		}
@@ -157,8 +157,8 @@ void fv1::apply_friction
 void fv1::drain_nodata_water
 (
     Pars* Parptr,
-	Solver *Solverptr,
-	BoundCs *BCptr,
+    Solver *Solverptr,
+    BoundCs *BCptr,
     Arrays *Arrptr
 )
 {
@@ -259,20 +259,22 @@ void fv1::update_fluxes
 	{
 		for(int i=1; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE H_neg = Arrptr->Hstar_pos_x[j*Parptr->xsz + i-1];
-			NUMERIC_TYPE H_pos = Arrptr->Hstar_neg_x[j*Parptr->xsz + i];
+			NUMERIC_TYPE H_neg = Arrptr->Hstar_neg_x[j*Parptr->xsz + i-1];
+			NUMERIC_TYPE HU_neg = HUstar_neg_x(
+					Parptr, Solverptr, Arrptr, i-1, j);
+			NUMERIC_TYPE HV_neg = HVstar_neg_x(
+					Parptr, Solverptr, Arrptr, i-1, j);
 
-			NUMERIC_TYPE HU_neg = HUstar_pos_x(Parptr, Solverptr, Arrptr, i-1, j);
-			NUMERIC_TYPE HV_neg = HVstar_pos_x(Parptr, Solverptr, Arrptr, i-1, j);
-			NUMERIC_TYPE HU_pos = HUstar_neg_x(Parptr, Solverptr, Arrptr, i, j);
-			NUMERIC_TYPE HV_pos = HVstar_neg_x(Parptr, Solverptr, Arrptr, i, j);
+			NUMERIC_TYPE H_pos = Arrptr->Hstar_pos_x[j*Parptr->xsz + i];
+			NUMERIC_TYPE HU_pos = HUstar_pos_x(Parptr, Solverptr, Arrptr, i, j);
+			NUMERIC_TYPE HV_pos = HVstar_pos_x(Parptr, Solverptr, Arrptr, i, j);
 
 			NUMERIC_TYPE& FHx = Arrptr->FHx[j*(Parptr->xsz+1) + i];
 			NUMERIC_TYPE& FHUx = Arrptr->FHUx[j*(Parptr->xsz+1) + i];
 			NUMERIC_TYPE& FHVx = Arrptr->FHVx[j*(Parptr->xsz+1) + i];
 
-			HLL_x(Solverptr, H_neg, HU_neg, HV_neg,
-					H_pos, HU_pos, HV_pos, FHx, FHUx, FHVx);
+			HLL_x(Solverptr, H_neg, HU_neg, HV_neg, H_pos, HU_pos, HV_pos,
+				FHx, FHUx, FHVx);
 		}
 	}
 
@@ -281,20 +283,22 @@ void fv1::update_fluxes
 	{
 		for(int i=0; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE H_neg = Arrptr->Hstar_pos_y[(j-1)*Parptr->xsz + i];
-			NUMERIC_TYPE H_pos = Arrptr->Hstar_neg_y[j*Parptr->xsz + i];
+			NUMERIC_TYPE H_neg = Arrptr->Hstar_neg_y[j*Parptr->xsz + i];
+			NUMERIC_TYPE HU_neg = HUstar_neg_y(Parptr, Solverptr, Arrptr, i, j);
+			NUMERIC_TYPE HV_neg = HVstar_neg_y(Parptr, Solverptr, Arrptr, i, j);
 
-			NUMERIC_TYPE HU_neg = HUstar_pos_y(Parptr, Solverptr, Arrptr, i, j-1);
-			NUMERIC_TYPE HV_neg = HVstar_pos_y(Parptr, Solverptr, Arrptr, i, j-1);
-			NUMERIC_TYPE HU_pos = HUstar_neg_y(Parptr, Solverptr, Arrptr, i, j);
-			NUMERIC_TYPE HV_pos = HVstar_neg_y(Parptr, Solverptr, Arrptr, i, j);
+			NUMERIC_TYPE H_pos = Arrptr->Hstar_pos_y[(j-1)*Parptr->xsz + i];
+			NUMERIC_TYPE HU_pos = HUstar_pos_y(
+					Parptr, Solverptr, Arrptr, i, j-1);
+			NUMERIC_TYPE HV_pos = HVstar_pos_y(
+					Parptr, Solverptr, Arrptr, i, j-1);
 
 			NUMERIC_TYPE& FHy = Arrptr->FHy[j*(Parptr->xsz+1) + i];
 			NUMERIC_TYPE& FHUy = Arrptr->FHUy[j*(Parptr->xsz+1) + i];
 			NUMERIC_TYPE& FHVy = Arrptr->FHVy[j*(Parptr->xsz+1) + i];
 
-			HLL_y(Solverptr, H_neg, HU_neg, HV_neg,
-					H_pos, HU_pos, HV_pos, FHy, FHUy, FHVy);
+			HLL_y(Solverptr, H_neg, HU_neg, HV_neg, H_pos, HU_pos, HV_pos,
+					FHy, FHUy, FHVy);
 		}
 	}
 }
@@ -312,14 +316,14 @@ void fv1::update_fluxes_on_boundaries
 	for (int j=0; j<Parptr->ysz; j++)
 	{
 		const int i = 0;
-		NUMERIC_TYPE H_inside = Arrptr->Hstar_neg_x[j*Parptr->xsz + i];
-		NUMERIC_TYPE HU_inside = HUstar_neg_x(Parptr, Solverptr, Arrptr, i, j);
-		NUMERIC_TYPE HV_inside = HVstar_neg_x(Parptr, Solverptr, Arrptr, i, j);
+		NUMERIC_TYPE H_inside = Arrptr->Hstar_pos_x[j*Parptr->xsz + i];
+		NUMERIC_TYPE HU_inside = HUstar_pos_x(Parptr, Solverptr, Arrptr, i, j);
+		NUMERIC_TYPE HV_inside = HVstar_pos_x(Parptr, Solverptr, Arrptr, i, j);
 
 		NUMERIC_TYPE& FHx = Arrptr->FHx[j*(Parptr->xsz+1) + i];
 		NUMERIC_TYPE& FHUx = Arrptr->FHUx[j*(Parptr->xsz+1) + i];
 		NUMERIC_TYPE& FHVx = Arrptr->FHVx[j*(Parptr->xsz+1) + i];
-
+		
 		NUMERIC_TYPE H_outside = C(0.0);
 		NUMERIC_TYPE HU_outside = C(0.0);
 		NUMERIC_TYPE HV_outside = C(0.0);
@@ -338,9 +342,11 @@ void fv1::update_fluxes_on_boundaries
 	for (int j=0; j<Parptr->ysz; j++)
 	{
 		const int i = Parptr->xsz;
-		NUMERIC_TYPE H_inside = Arrptr->Hstar_pos_x[j*Parptr->xsz + i-1];
-		NUMERIC_TYPE HU_inside = HUstar_pos_x(Parptr, Solverptr, Arrptr, i-1, j);
-		NUMERIC_TYPE HV_inside = HVstar_pos_x(Parptr, Solverptr, Arrptr, i-1, j);
+		NUMERIC_TYPE H_inside = Arrptr->Hstar_neg_x[j*Parptr->xsz + i-1];
+		NUMERIC_TYPE HU_inside = HUstar_neg_x(
+				Parptr, Solverptr, Arrptr, i-1, j);
+		NUMERIC_TYPE HV_inside = HVstar_neg_x(
+				Parptr, Solverptr, Arrptr, i-1, j);
 
 		NUMERIC_TYPE& FHx = Arrptr->FHx[j*(Parptr->xsz+1) + i];
 		NUMERIC_TYPE& FHUx = Arrptr->FHUx[j*(Parptr->xsz+1) + i];
@@ -553,7 +559,7 @@ void fv1::set_boundary_values
 		break;
 	case QVAR5:
 		HU_outside = HU_sign * linear_interpolate(
-					BCptr->PS_TimeSeries[bc_i], Solverptr->t);
+				BCptr->BC_TimeSeries[bc_i], Solverptr->t);
 		if (FABS(HU_outside) > C(1e-12))
 		{
 			H_inside = H_outside = FMAX(H_inside, C(1.1)*Solverptr->DepthThresh);
