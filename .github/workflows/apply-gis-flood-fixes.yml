@@ -53,7 +53,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --check
+          git -c core.whitespace=cr-at-eol diff --check
           changed="$(git diff --name-only)"
           printf '%s\n' "$changed"
           test "$changed" = $'lisflood/cuda/cuda_boundary.cu\nlisflood/swe/fv1.cpp' || {
