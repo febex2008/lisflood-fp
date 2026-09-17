@@ -98,9 +98,10 @@ private:
 	bool adaptive;
 	NUMERIC_TYPE& dt;
 	NUMERIC_TYPE max_dt;
-	const Solver<F>& solver;
+	Solver<F>& solver;
 	NUMERIC_TYPE* dt_field;
 	const int elements;
+	int reduction_elements;
 	void* d_temp;
 	size_t bytes;
 };
