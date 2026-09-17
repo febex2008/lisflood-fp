@@ -1,0 +1,51 @@
+name: Repair FV1 closed-boundary patch
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - '.github/workflows/repair-fv1-closed-boundary.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+      - name: Restore parent file and apply exact one-line fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout b58f1862c323006b6e7fc9431103c0c208827dff -- lisflood/swe/fv1.cpp
+          count=$(grep -Fxc $'\t\tHV_outside = HV_outside;' lisflood/swe/fv1.cpp || true)
+          if [ "$count" -ne 1 ]; then
+            echo "Expected exactly one closed-boundary self-assignment, found $count"
+            exit 1
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('lisflood/swe/fv1.cpp')
+          b = p.read_bytes()
+          old = b'\t\tHV_outside = HV_outside;'
+          new = b'\t\tHV_outside = HV_inside;'
+          if b.count(old) != 1:
+              raise SystemExit(f'expected one occurrence, found {b.count(old)}')
+          p.write_bytes(b.replace(old, new, 1))
+          PY
+          git diff --check
+          git diff --numstat b58f1862c323006b6e7fc9431103c0c208827dff -- lisflood/swe/fv1.cpp
+          test "$(git diff --numstat b58f1862c323006b6e7fc9431103c0c208827dff -- lisflood/swe/fv1.cpp | awk '{print $1":"$2}')" = "1:1"
+      - name: Commit repaired file
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lisflood/swe/fv1.cpp
+          git commit -m 'Repair FV1 closed-boundary patch' -m 'Restore fv1.cpp exactly from the pre-patch parent and apply only the intended tangential-momentum correction for NONE0.'
+          git push origin HEAD:dev
