@@ -33,15 +33,16 @@ public:
 
 	void zero_ghost_cells();
 
-	void update_ghost_cells();
+	void update_ghost_cells(cudaStream_t stream = 0);
 	
-	void update_uniform_rain(NUMERIC_TYPE  rain_rate);
+	void update_uniform_rain(NUMERIC_TYPE rain_rate, cudaStream_t stream = 0);
 
 	void updateMaxFieldACC(NUMERIC_TYPE t);
 
 	Flow& update_flow_variables
 	(
-		MassStats* mass_stats
+		MassStats* mass_stats,
+		cudaStream_t stream = 0
 	);
 
 	Flow& d_U();
@@ -50,6 +51,8 @@ public:
 	(
 		NUMERIC_TYPE* dt_field
 	) const;
+
+	void swap_state();
 
 	~Solver();
 
