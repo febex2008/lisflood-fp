@@ -52,9 +52,9 @@ class Solver
 	public:
 	virtual void zero_ghost_cells() = 0;
 
-	virtual void update_ghost_cells(cudaStream_t stream = 0) = 0;
+	virtual void update_ghost_cells() = 0;
 
-	virtual void update_uniform_rain(NUMERIC_TYPE rain_rate, cudaStream_t stream = 0) = 0;
+	virtual void update_uniform_rain(NUMERIC_TYPE rain_rate) = 0;
 
 	virtual void updateMaxFieldACC(NUMERIC_TYPE t) = 0;
 	
@@ -64,8 +64,7 @@ class Solver
 
 	virtual F& update_flow_variables
 	(
-		MassStats* mass_stats,
-		cudaStream_t stream = 0
+		MassStats* mass_stats
 	) = 0;
 
 	virtual F& d_U() = 0;
