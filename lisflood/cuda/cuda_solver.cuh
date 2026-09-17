@@ -101,7 +101,9 @@ private:
 	NUMERIC_TYPE max_dt;
 	Solver<F>& solver;
 	NUMERIC_TYPE* dt_field;
-	const int elements;
+	const int xsz;
+	const int ysz;
+	dim3 reduction_grid;
 	int reduction_elements;
 	void* d_temp;
 	size_t bytes;
