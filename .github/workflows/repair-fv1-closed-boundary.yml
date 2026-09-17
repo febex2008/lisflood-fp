@@ -21,6 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Restore the exact pre-patch source, preserving its original line endings.
           git checkout b58f1862c323006b6e7fc9431103c0c208827dff -- lisflood/swe/fv1.cpp
           python3 - <<'PY'
           from pathlib import Path
