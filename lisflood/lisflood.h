@@ -187,6 +187,8 @@ enum ESourceType {
 	TRIB7 = 7,
 	// rivers
 	RATE8 = 8,
+	// GIS-Flood custom flux-transmissive outer boundary
+	TRANSMISSIVE9 = 9,
 };
 
 enum EWeirType

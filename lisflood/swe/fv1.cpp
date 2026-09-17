@@ -323,6 +323,15 @@ void fv1::update_fluxes_on_boundaries
 		NUMERIC_TYPE& FHx = Arrptr->FHx[j*(Parptr->xsz+1) + i];
 		NUMERIC_TYPE& FHUx = Arrptr->FHUx[j*(Parptr->xsz+1) + i];
 		NUMERIC_TYPE& FHVx = Arrptr->FHVx[j*(Parptr->xsz+1) + i];
+
+		const int bc_i = boundary_index_w(Parptr, i, j);
+		if (BCptr->BC_Ident[bc_i] == TRANSMISSIVE9 && Parptr->xsz > 1)
+		{
+			FHx = Arrptr->FHx[j*(Parptr->xsz+1) + 1];
+			FHUx = Arrptr->FHUx[j*(Parptr->xsz+1) + 1];
+			FHVx = Arrptr->FHVx[j*(Parptr->xsz+1) + 1];
+			continue;
+		}
 		
 		NUMERIC_TYPE H_outside = C(0.0);
 		NUMERIC_TYPE HU_outside = C(0.0);
@@ -352,6 +361,15 @@ void fv1::update_fluxes_on_boundaries
 		NUMERIC_TYPE& FHUx = Arrptr->FHUx[j*(Parptr->xsz+1) + i];
 		NUMERIC_TYPE& FHVx = Arrptr->FHVx[j*(Parptr->xsz+1) + i];
 
+		const int bc_i = boundary_index_e(Parptr, i, j);
+		if (BCptr->BC_Ident[bc_i] == TRANSMISSIVE9 && Parptr->xsz > 1)
+		{
+			FHx = Arrptr->FHx[j*(Parptr->xsz+1) + i-1];
+			FHUx = Arrptr->FHUx[j*(Parptr->xsz+1) + i-1];
+			FHVx = Arrptr->FHVx[j*(Parptr->xsz+1) + i-1];
+			continue;
+		}
+
 		NUMERIC_TYPE H_outside = C(0.0);
 		NUMERIC_TYPE HU_outside = C(0.0);
 		NUMERIC_TYPE HV_outside = C(0.0);
@@ -377,6 +395,15 @@ void fv1::update_fluxes_on_boundaries
 		NUMERIC_TYPE& FHy = Arrptr->FHy[j*(Parptr->xsz+1) + i];
 		NUMERIC_TYPE& FHUy = Arrptr->FHUy[j*(Parptr->xsz+1) + i];
 		NUMERIC_TYPE& FHVy = Arrptr->FHVy[j*(Parptr->xsz+1) + i];
+
+		const int bc_i = boundary_index_n(Parptr, i, j);
+		if (BCptr->BC_Ident[bc_i] == TRANSMISSIVE9 && Parptr->ysz > 1)
+		{
+			FHy = Arrptr->FHy[(j+1)*(Parptr->xsz+1) + i];
+			FHUy = Arrptr->FHUy[(j+1)*(Parptr->xsz+1) + i];
+			FHVy = Arrptr->FHVy[(j+1)*(Parptr->xsz+1) + i];
+			continue;
+		}
 
 		NUMERIC_TYPE H_outside = C(0.0);
 		NUMERIC_TYPE HU_outside = C(0.0);
@@ -405,6 +432,15 @@ void fv1::update_fluxes_on_boundaries
 		NUMERIC_TYPE& FHy = Arrptr->FHy[j*(Parptr->xsz+1) + i];
 		NUMERIC_TYPE& FHUy = Arrptr->FHUy[j*(Parptr->xsz+1) + i];
 		NUMERIC_TYPE& FHVy = Arrptr->FHVy[j*(Parptr->xsz+1) + i];
+
+		const int bc_i = boundary_index_s(Parptr, i, j);
+		if (BCptr->BC_Ident[bc_i] == TRANSMISSIVE9 && Parptr->ysz > 1)
+		{
+			FHy = Arrptr->FHy[(j-1)*(Parptr->xsz+1) + i];
+			FHUy = Arrptr->FHUy[(j-1)*(Parptr->xsz+1) + i];
+			FHVy = Arrptr->FHVy[(j-1)*(Parptr->xsz+1) + i];
+			continue;
+		}
 
 		NUMERIC_TYPE H_outside = C(0.0);
 		NUMERIC_TYPE HU_outside = C(0.0);
@@ -521,6 +557,7 @@ void fv1::set_boundary_values
 	switch (BCptr->BC_Ident[bc_i])
 	{
 	case FREE1:
+	case TRANSMISSIVE9:
 		H_outside = H_inside;
 		HU_outside = HU_inside;
 		HV_outside = HV_inside;

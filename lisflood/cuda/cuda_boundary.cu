@@ -342,6 +342,7 @@ __device__ lis::cuda::FlowVector lis::cuda::Boundary::outside_x
 	switch (cuda::boundaries.BC_type[bc_i])
 	{
 	case FREE1:
+	case TRANSMISSIVE9:
 		break;
 	case HFIX2:
 	case HVAR3:
@@ -394,6 +395,7 @@ __device__ lis::cuda::FlowVector lis::cuda::Boundary::inside_x
 	switch (cuda::boundaries.BC_type[bc_i])
 	{
 	case FREE1:
+	case TRANSMISSIVE9:
 		return U_inside;
 	case HFIX2:
 	case HVAR3:
