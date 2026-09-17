@@ -18,7 +18,7 @@ public:
 		int acceleration
 	);
 
-	void zero_instantaneous_mass();
+	void zero_instantaneous_mass(cudaStream_t stream = 0);
 
 	void accumulate_mass();
 
