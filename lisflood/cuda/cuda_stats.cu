@@ -64,9 +64,9 @@ elements((acceleration == 0) ? lis::GhostRaster::elements(geometry) : lis::Ghost
 	zero_cumulative_mass();
 }
 
-void lis::cuda::StatsCollector::zero_instantaneous_mass()
+void lis::cuda::StatsCollector::zero_instantaneous_mass(cudaStream_t stream)
 {
-	checkCudaErrors(cudaMemsetAsync(d_instantaneous_mass, 0, sizeof(MassStats)));
+	checkCudaErrors(cudaMemsetAsync(d_instantaneous_mass, 0, sizeof(MassStats), stream));
 }
 
 lis::MassStats* lis::cuda::StatsCollector::instantaneous_mass()
