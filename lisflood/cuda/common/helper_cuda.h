@@ -37,6 +37,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef LFP_CUDA_THROW_ON_ERROR
+#include <stdexcept>
+#endif
 
 #include <helper_string.h>
 
@@ -593,11 +596,19 @@ template <typename T>
 void check(T result, char const *const func, const char *const file,
            int const line) {
   if (result) {
+#ifdef LFP_CUDA_THROW_ON_ERROR
+    char message[1024];
+    snprintf(message, sizeof(message),
+             "CUDA error at %s:%d code=%d(%s) \"%s\"", file, line,
+             static_cast<unsigned int>(result), _cudaGetErrorEnum(result), func);
+    throw std::runtime_error(message);
+#else
     fprintf(stderr, "CUDA error at %s:%d code=%d(%s) \"%s\" \n", file, line,
             static_cast<unsigned int>(result), _cudaGetErrorEnum(result), func);
     DEVICE_RESET
     // Make sure we call CUDA Device Reset before exiting
     exit(EXIT_FAILURE);
+#endif
   }
 }
 
@@ -614,6 +625,14 @@ inline void __getLastCudaError(const char *errorMessage, const char *file,
   cudaError_t err = cudaGetLastError();
 
   if (cudaSuccess != err) {
+#ifdef LFP_CUDA_THROW_ON_ERROR
+    char message[1024];
+    snprintf(message, sizeof(message),
+             "%s(%i) : getLastCudaError() CUDA error : %s : (%d) %s.",
+             file, line, errorMessage, static_cast<int>(err),
+             cudaGetErrorString(err));
+    throw std::runtime_error(message);
+#else
     fprintf(stderr,
             "%s(%i) : getLastCudaError() CUDA error :"
             " %s : (%d) %s.\n",
@@ -621,6 +640,7 @@ inline void __getLastCudaError(const char *errorMessage, const char *file,
             cudaGetErrorString(err));
     DEVICE_RESET
     exit(EXIT_FAILURE);
+#endif
   }
 }
 
