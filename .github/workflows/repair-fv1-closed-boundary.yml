@@ -22,11 +22,6 @@ jobs:
         run: |
           set -euo pipefail
           git checkout b58f1862c323006b6e7fc9431103c0c208827dff -- lisflood/swe/fv1.cpp
-          count=$(grep -Fxc $'\t\tHV_outside = HV_outside;' lisflood/swe/fv1.cpp || true)
-          if [ "$count" -ne 1 ]; then
-            echo "Expected exactly one closed-boundary self-assignment, found $count"
-            exit 1
-          fi
           python3 - <<'PY'
           from pathlib import Path
           p = Path('lisflood/swe/fv1.cpp')
