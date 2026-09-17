@@ -35,26 +35,21 @@ jobs:
                   raise SystemExit(f'{path}: expected exactly one match, found {n}')
               p.write_bytes(b.replace(old,new,1))
 
-          # New custom source type; keep all existing numeric values unchanged.
           replace_once('lisflood/lisflood.h',
               lambda nl: b'\tRATE8 = 8,'+nl,
               lambda nl: b'\tRATE8 = 8,'+nl+b'\t// GIS-Flood custom flux-transmissive outer boundary'+nl+b'\tTRANSMISSIVE9 = 9,'+nl)
 
-          # CPU FV1: FREE fallback semantics for degenerate one-cell-wide domains.
           replace_once('lisflood/swe/fv1.cpp',
               lambda nl: b'\tcase FREE1:'+nl+b'\t\tH_outside = H_inside;',
               lambda nl: b'\tcase FREE1:'+nl+b'\tcase TRANSMISSIVE9:'+nl+b'\t\tH_outside = H_inside;')
 
-          # CPU FV1: carry the full nearest interior HLL flux vector through each outer face.
           p,b,nl=read('lisflood/swe/fv1.cpp')
-          s=b.decode('utf-8')
-          NL=nl.decode()
+          s=b.decode('utf-8'); NL=nl.decode()
           def inject_segment(text, start, end, needle, payload):
               a=text.index(start); z=text.index(end,a)
               seg=text[a:z]
               pos=seg.index(needle)+len(needle)
-              seg=seg[:pos]+payload+seg[pos:]
-              return text[:a]+seg+text[z:]
+              return text[:a]+seg[:pos]+payload+seg[pos:]+text[z:]
 
           s=inject_segment(s, '\t// west'+NL, '\t// east'+NL,
               '\t\tNUMERIC_TYPE& FHVx = Arrptr->FHVx[j*(Parptr->xsz+1) + i];'+NL,
@@ -101,8 +96,6 @@ jobs:
               '\t\t}'+NL)
           p.write_bytes(s.encode('utf-8'))
 
-          # CUDA ghost state: TRANSMISSIVE uses FREE-like copied state only for ghost/CFL support;
-          # the actual boundary flux is replaced below by the nearest resolved interior face flux.
           replace_once('lisflood/cuda/cuda_boundary.cu',
               lambda nl: b'\tcase FREE1:'+nl+b'\t\tbreak;',
               lambda nl: b'\tcase FREE1:'+nl+b'\tcase TRANSMISSIVE9:'+nl+b'\t\tbreak;')
@@ -110,8 +103,6 @@ jobs:
               lambda nl: b'\tcase FREE1:'+nl+b'\t\treturn U_inside;',
               lambda nl: b'\tcase FREE1:'+nl+b'\tcase TRANSMISSIVE9:'+nl+b'\t\treturn U_inside;')
 
-          # CUDA FV1: substitute boundary face fluxes in shared memory after all HLL faces
-          # have been resolved, then use the corrected shared flux for both update and stats.
           p,b,nl=read('lisflood/cuda/fv1/cuda_fv1_solver.cu')
           s=b.decode('utf-8'); NL=nl.decode()
 
@@ -123,7 +114,8 @@ jobs:
           x=x.replace(old,'\t\t\t\tF[threadIdx.y][threadIdx.x] = F_e;'+NL,1)
           marker='\t\t\t__syncthreads();'+NL+NL+'\t\t\tif (threadIdx.x == 0) continue;'+NL
           if x.count(marker)!=1: raise SystemExit('CUDA x: sync marker mismatch')
-          ins='\t\t\t__syncthreads();'+NL+NL+
+          ins=(
+              '\t\t\t__syncthreads();'+NL+NL+
               '\t\t\tif (i <= cuda::geometry.xsz && j <= cuda::geometry.ysz)'+NL+
               '\t\t\t{'+NL+
               '\t\t\t\tif (i == 0 && cuda::geometry.xsz > 1'+NL+
@@ -140,6 +132,7 @@ jobs:
               '\t\t\t\tupdate_mass_stats_x(mass_stats, F_e.H, i, j);'+NL+
               '\t\t\t}'+NL+NL+
               '\t\t\tif (threadIdx.x == 0) continue;'+NL
+          )
           x=x.replace(marker,ins,1)
           s=s[:xa]+x+s[xz:]
 
@@ -151,7 +144,8 @@ jobs:
           y=y.replace(old,'\t\t\t\tF[threadIdx.y][threadIdx.x] = F_s;'+NL,1)
           marker='                        __syncthreads();'+NL+NL+'                        if (threadIdx.y == 0) continue;'+NL
           if y.count(marker)!=1: raise SystemExit('CUDA y: sync marker mismatch')
-          ins='                        __syncthreads();'+NL+NL+
+          ins=(
+              '                        __syncthreads();'+NL+NL+
               '\t\t\tif (i <= cuda::geometry.xsz && j <= cuda::geometry.ysz)'+NL+
               '\t\t\t{'+NL+
               '\t\t\t\tif (j == 0 && cuda::geometry.ysz > 1'+NL+
@@ -168,6 +162,7 @@ jobs:
               '\t\t\t\tupdate_mass_stats_y(mass_stats, F_s.H, i, j);'+NL+
               '\t\t\t}'+NL+NL+
               '                        if (threadIdx.y == 0) continue;'+NL
+          )
           y=y.replace(marker,ins,1)
           s=s[:ya]+y+s[yz:]
           p.write_bytes(s.encode('utf-8'))
@@ -181,7 +176,7 @@ jobs:
           test "$(git diff --name-only | wc -l)" -eq 4
           grep -q 'TRANSMISSIVE9 = 9' lisflood/lisflood.h
           grep -q 'BCptr->BC_Ident\[bc_i\] == TRANSMISSIVE9' lisflood/swe/fv1.cpp
-          grep -q 'Boundary::index_w(i, j).*TRANSMISSIVE9\|TRANSMISSIVE9' lisflood/cuda/fv1/cuda_fv1_solver.cu
+          grep -q 'TRANSMISSIVE9' lisflood/cuda/fv1/cuda_fv1_solver.cu
 
       - name: Commit native implementation
         shell: bash
