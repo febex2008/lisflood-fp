@@ -319,14 +319,8 @@ update_flow_variables_x
 				F[threadIdx.y][threadIdx.x] = F_e;
 			}
 			__syncthreads();
-			if (i <= cuda::geometry.xsz && j <= cuda::geometry.ysz)
-			{
-				if (i == 0 && cuda::geometry.xsz > 1 && cuda::boundaries.BC_type[Boundary::index_w(i, j)] == TRANSMISSIVE9)
-					F[threadIdx.y][threadIdx.x] = F[threadIdx.y][threadIdx.x+1];
-				else if (i == cuda::geometry.xsz && cuda::geometry.xsz > 1 && cuda::boundaries.BC_type[Boundary::index_e(i, j)] == TRANSMISSIVE9)
-					F[threadIdx.y][threadIdx.x] = F[threadIdx.y][threadIdx.x-1];
-			}
-			__syncthreads();
+			// Keep the HLL boundary flux from the extrapolated ghost state.
+			// Copying an interior-face flux here breaks the bed-source balance.
 			if (i <= cuda::geometry.xsz && j <= cuda::geometry.ysz)
 			{
 				F_e = F[threadIdx.y][threadIdx.x];
@@ -398,14 +392,8 @@ update_flow_variables_y
 				F[threadIdx.y][threadIdx.x] = F_s;
 			}
 			__syncthreads();
-			if (i <= cuda::geometry.xsz && j <= cuda::geometry.ysz)
-			{
-				if (j == 0 && cuda::geometry.ysz > 1 && cuda::boundaries.BC_type[Boundary::index_n(i, j)] == TRANSMISSIVE9)
-					F[threadIdx.y][threadIdx.x] = F[threadIdx.y+1][threadIdx.x];
-				else if (j == cuda::geometry.ysz && cuda::geometry.ysz > 1 && cuda::boundaries.BC_type[Boundary::index_s(i, j)] == TRANSMISSIVE9)
-					F[threadIdx.y][threadIdx.x] = F[threadIdx.y-1][threadIdx.x];
-			}
-			__syncthreads();
+			// Keep the HLL boundary flux from the extrapolated ghost state.
+			// Copying an interior-face flux here breaks the bed-source balance.
 			if (i <= cuda::geometry.xsz && j <= cuda::geometry.ysz)
 			{
 				F_s = F[threadIdx.y][threadIdx.x];
