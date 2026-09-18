@@ -26,6 +26,22 @@ extern __managed__ int sample_buf_idx;
 
 extern const dim3 block_size;
 
+struct CflDiagnosticRecord
+{
+	int cell_index;
+	int limiting_axis; /* 0=none/dry, 1=x, 2=y */
+	NUMERIC_TYPE cfl_dt;
+	NUMERIC_TYPE H;
+	NUMERIC_TYPE HU;
+	NUMERIC_TYPE HV;
+	NUMERIC_TYPE dt_x;
+	NUMERIC_TYPE dt_y;
+	NUMERIC_TYPE wave;
+	NUMERIC_TYPE neighbour_H[9];
+	NUMERIC_TYPE neighbour_HU[9];
+	NUMERIC_TYPE neighbour_HV[9];
+};
+
 __device__
 void update_mass_stats_x
 (
@@ -93,6 +109,14 @@ public:
 	void update_dt_async(cudaStream_t stream = 0);
 	NUMERIC_TYPE update_dt();
 
+	void enable_diagnostics(int capacity);
+	void disable_diagnostics();
+	void reset_diagnostics(cudaStream_t stream = 0);
+	CflDiagnosticRecord* diagnostics_records_device() const { return diagnostic_records; }
+	unsigned long long* diagnostics_count_device() const { return diagnostic_count; }
+	int diagnostics_capacity() const { return diagnostic_capacity; }
+	bool diagnostics_enabled() const { return diagnostic_records != nullptr; }
+
 	~DynamicTimestep();
 
 private:
@@ -107,6 +131,10 @@ private:
 	int reduction_elements;
 	void* d_temp;
 	size_t bytes;
+	int* diagnostic_index_field;
+	CflDiagnosticRecord* diagnostic_records;
+	unsigned long long* diagnostic_count;
+	int diagnostic_capacity;
 };
 
 
