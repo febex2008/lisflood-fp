@@ -342,12 +342,6 @@ update_flow_variables_x
 				HU = U0.HU - cuda::dt * ((F_e.HU - F_w.HU)/cuda::geometry.dx
 					- bed_source_x(Zstar_w, Zstar_e, Hstar_w, Ustar_neg.H, ETA));
 				HV = U0.HV - cuda::dt * (F_e.HV - F_w.HV)/cuda::geometry.dx;
-				if (H < C(0.0))
-				{
-					const NUMERIC_TYPE correction = -H * cuda::geometry.dx * cuda::geometry.dy;
-					H = C(0.0); HU = C(0.0); HV = C(0.0);
-					if (negative_depth_volume != nullptr) atomicAdd(negative_depth_volume, correction);
-				}
 			}
 		}
 	}
