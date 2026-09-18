@@ -342,7 +342,15 @@ __device__ lis::cuda::FlowVector lis::cuda::Boundary::outside_x
 	switch (cuda::boundaries.BC_type[bc_i])
 	{
 	case FREE1:
+		break;
 	case TRANSMISSIVE9:
+		/* Outflow-only transmissive ("diode") boundary. HU_sign points
+		   into the domain. Preserve depth and tangential momentum, but
+		   reflect the normal momentum when flow attempts to enter. */
+		U_outside.H = U_inside.H;
+		U_outside.HV = U_inside.HV;
+		U_outside.HU = (HU_sign * U_inside.HU > C(0.0))
+			? -U_inside.HU : U_inside.HU;
 		break;
 	case HFIX2:
 	case HVAR3:

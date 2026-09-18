@@ -60,6 +60,11 @@ public:
 
 	void swap_state();
 
+	void set_negative_depth_counter(NUMERIC_TYPE* counter)
+	{
+		negative_depth_volume = counter;
+	}
+
 	~Solver();
 
 private:
@@ -72,6 +77,7 @@ private:
 	NUMERIC_TYPE* Zstar_x;
 	NUMERIC_TYPE* Zstar_y;
 	NUMERIC_TYPE* manning;
+	NUMERIC_TYPE* negative_depth_volume;
 	bool friction;
 	const dim3 grid_size;
 };

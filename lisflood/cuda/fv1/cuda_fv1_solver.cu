@@ -282,7 +282,8 @@ update_flow_variables_x
 	Flow U,
 	NUMERIC_TYPE* DEM,
 	NUMERIC_TYPE* Zstar_x,
-	MassStats* mass_stats
+	MassStats* mass_stats,
+	NUMERIC_TYPE* negative_depth_volume
 )
 {
 	__shared__ FlowVector F[CUDA_BLOCK_SIZE_Y][CUDA_BLOCK_SIZE_X];
@@ -341,6 +342,12 @@ update_flow_variables_x
 				HU = U0.HU - cuda::dt * ((F_e.HU - F_w.HU)/cuda::geometry.dx
 					- bed_source_x(Zstar_w, Zstar_e, Hstar_w, Ustar_neg.H, ETA));
 				HV = U0.HV - cuda::dt * (F_e.HV - F_w.HV)/cuda::geometry.dx;
+				if (H < C(0.0))
+				{
+					const NUMERIC_TYPE correction = -H * cuda::geometry.dx * cuda::geometry.dy;
+					H = C(0.0); HU = C(0.0); HV = C(0.0);
+					if (negative_depth_volume != nullptr) atomicAdd(negative_depth_volume, correction);
+				}
 			}
 		}
 	}
@@ -355,7 +362,8 @@ update_flow_variables_y
 	Flow U,
 	NUMERIC_TYPE* DEM,
 	NUMERIC_TYPE* Zstar_y,
-	MassStats* mass_stats
+	MassStats* mass_stats,
+	NUMERIC_TYPE* negative_depth_volume
 )
 {
 	__shared__ FlowVector F[CUDA_BLOCK_SIZE_Y][CUDA_BLOCK_SIZE_X];
@@ -414,6 +422,12 @@ update_flow_variables_y
 				HU = U0.HU - cuda::dt * (F_n.HU - F_s.HU)/cuda::geometry.dy;
 				HV = U0.HV - cuda::dt * ((F_n.HV - F_s.HV)/cuda::geometry.dy
 					- bed_source_y(Zstar_s, Zstar_n, Ustar_pos.H, Hstar_n, ETA));
+				if (H < C(0.0))
+				{
+					const NUMERIC_TYPE correction = -H * cuda::geometry.dx * cuda::geometry.dy;
+					H = C(0.0); HU = C(0.0); HV = C(0.0);
+					if (negative_depth_volume != nullptr) atomicAdd(negative_depth_volume, correction);
+				}
 			}
 		}
 	}
@@ -441,6 +455,7 @@ DEM(DEM),
 Zstar_x(Zstar_x),
 Zstar_y(Zstar_y),
 manning(manning),
+negative_depth_volume(nullptr),
 grid_size(grid_size)
 {
 	Flow::allocate_device(U1, geometry);
@@ -475,9 +490,9 @@ lis::cuda::fv1::Flow& lis::cuda::fv1::Solver::update_flow_variables
 	}
 
 	update_flow_variables_x<<<grid_size, cuda::block_size, 0, stream>>>
-			(Uold, Ux, DEM, Zstar_x, mass_stats);
+			(Uold, Ux, DEM, Zstar_x, mass_stats, negative_depth_volume);
 	update_flow_variables_y<<<grid_size, cuda::block_size, 0, stream>>>
-			(Uold, Ux, U, DEM, Zstar_y, mass_stats);
+			(Uold, Ux, U, DEM, Zstar_y, mass_stats, negative_depth_volume);
 	std::swap(Uold, U);
 	return Uold;
 }

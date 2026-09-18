@@ -533,9 +533,16 @@ void fv1::set_boundary_values
 	switch (BCptr->BC_Ident[bc_i])
 	{
 	case FREE1:
-	case TRANSMISSIVE9:
 		H_outside = H_inside;
 		HU_outside = HU_inside;
+		HV_outside = HV_inside;
+		break;
+	case TRANSMISSIVE9:
+		/* Outflow-only transmissive ("diode") boundary. HU_sign points
+		   into the domain. Reject attempted inflow by reflecting only
+		   normal momentum; preserve depth and tangential momentum. */
+		H_outside = H_inside;
+		HU_outside = (HU_sign * HU_inside > C(0.0)) ? -HU_inside : HU_inside;
 		HV_outside = HV_inside;
 		break;
 	case HFIX2:
