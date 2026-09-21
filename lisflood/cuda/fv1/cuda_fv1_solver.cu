@@ -140,7 +140,8 @@ __global__ void prepare_sparse_face_fluxes
 		result.desired_neg = result.base;
 		result.desired_pos = result.base;
 
-		if (face.type == SPARSE_FACE_TRANSMISSIVE_OUTFLOW)
+		if (face.type == SPARSE_FACE_TRANSMISSIVE_OUTFLOW ||
+			face.type == SPARSE_FACE_FREE || face.type == SPARSE_FACE_CLOSED)
 		{
 			const bool neg_inside = face.neg_cell >= 0;
 			const bool pos_inside = face.pos_cell >= 0;
@@ -148,12 +149,20 @@ __global__ void prepare_sparse_face_fluxes
 			{
 				FlowVector U_inside = neg_inside ? Ustar_neg : Ustar_pos;
 				FlowVector U_outside = U_inside;
-				const NUMERIC_TYPE normal_momentum = face.axis == 0 ? U_inside.HU : U_inside.HV;
-				const NUMERIC_TYPE outward_momentum = (neg_inside ? C(1.0) : C(-1.0)) * normal_momentum;
-				if (outward_momentum < C(0.0))
+				if (face.type == SPARSE_FACE_CLOSED)
 				{
 					if (face.axis == 0) U_outside.HU = -U_outside.HU;
 					else U_outside.HV = -U_outside.HV;
+				}
+				else if (face.type == SPARSE_FACE_TRANSMISSIVE_OUTFLOW)
+				{
+					const NUMERIC_TYPE normal_momentum = face.axis == 0 ? U_inside.HU : U_inside.HV;
+					const NUMERIC_TYPE outward_momentum = (neg_inside ? C(1.0) : C(-1.0)) * normal_momentum;
+					if (outward_momentum < C(0.0))
+					{
+						if (face.axis == 0) U_outside.HU = -U_outside.HU;
+						else U_outside.HV = -U_outside.HV;
+					}
 				}
 				const FlowVector desired = neg_inside
 					? sparse_hll(face.axis, U_inside, U_outside)
