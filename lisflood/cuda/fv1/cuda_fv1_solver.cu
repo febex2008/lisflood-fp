@@ -285,8 +285,20 @@ __global__ void apply_sparse_face_fluxes
 			const NUMERIC_TYPE base_in = FMAX(C(0.0), -base_outward);
 			const NUMERIC_TYPE desired_out = FMAX(C(0.0), desired_outward);
 			const NUMERIC_TYPE desired_in = FMAX(C(0.0), -desired_outward);
-			atomicAdd(&(mass_stats->out), desired_out - base_out);
-			atomicAdd(&(mass_stats->in), desired_in - base_in);
+			const bool internal_domain =
+				(face.type == SPARSE_FACE_TRANSMISSIVE_OUTFLOW ||
+				 face.type == SPARSE_FACE_FREE || face.type == SPARSE_FACE_CLOSED) &&
+				face.p3 > C(0.5);
+			if (internal_domain)
+			{
+				atomicAdd(&(mass_stats->out), desired_out);
+				atomicAdd(&(mass_stats->in), desired_in);
+			}
+			else
+			{
+				atomicAdd(&(mass_stats->out), desired_out - base_out);
+				atomicAdd(&(mass_stats->in), desired_in - base_in);
+			}
 		}
 	}
 }
