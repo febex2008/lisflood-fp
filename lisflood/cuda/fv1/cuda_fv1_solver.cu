@@ -61,6 +61,188 @@ __global__ void zero_ghost_cells_east_west
 	}
 }
 
+__global__ void clamp_negative_depths_kernel
+(
+	Flow U,
+	NUMERIC_TYPE* negative_depth_volume
+)
+{
+	int global_i = blockIdx.x*blockDim.x + threadIdx.x;
+	int global_j = blockIdx.y*blockDim.y + threadIdx.y;
+	for (int j=global_j+1; j<cuda::geometry.ysz+1; j+=blockDim.y*gridDim.y)
+	{
+		for (int i=global_i+1; i<cuda::geometry.xsz+1; i+=blockDim.x*gridDim.x)
+		{
+			const int k = j*cuda::pitch + i;
+			NUMERIC_TYPE& H = U.H[k];
+			NUMERIC_TYPE& HU = U.HU[k];
+			NUMERIC_TYPE& HV = U.HV[k];
+			if (H < C(0.0))
+			{
+				const NUMERIC_TYPE correction = -H * cuda::geometry.dx * cuda::geometry.dy;
+				H = C(0.0);
+				HU = C(0.0);
+				HV = C(0.0);
+				if (negative_depth_volume != nullptr) atomicAdd(negative_depth_volume, correction);
+			}
+			else if (H == C(0.0))
+			{
+				HU = C(0.0);
+				HV = C(0.0);
+			}
+		}
+	}
+}
+
+__device__ inline FlowVector sparse_hll
+(
+	int axis,
+	const FlowVector& U_neg,
+	const FlowVector& U_pos
+)
+{
+	return axis == 0 ? HLL::x(U_neg, U_pos) : HLL::y(U_neg, U_pos);
+}
+
+__global__ void prepare_sparse_face_fluxes
+(
+	Flow Uold,
+	NUMERIC_TYPE* DEM,
+	NUMERIC_TYPE* Zstar_x,
+	NUMERIC_TYPE* Zstar_y,
+	const SparseFace* faces,
+	SparseFaceFlux* fluxes,
+	int count
+)
+{
+	for (int n=blockIdx.x*blockDim.x+threadIdx.x; n<count; n+=blockDim.x*gridDim.x)
+	{
+		const SparseFace face = faces[n];
+		const NUMERIC_TYPE Zstar = face.axis == 0 ? Zstar_x[face.face_g] : Zstar_y[face.face_g];
+		const FlowVector U_neg = Uold[face.neg_g];
+		const FlowVector U_pos = Uold[face.pos_g];
+		const FlowVector Ustar_neg = U_neg.star(DEM[face.neg_g], Zstar);
+		const FlowVector Ustar_pos = U_pos.star(DEM[face.pos_g], Zstar);
+		SparseFaceFlux result;
+		result.base = sparse_hll(face.axis, Ustar_neg, Ustar_pos);
+		result.desired = result.base;
+
+		if (face.type == SPARSE_FACE_TRANSMISSIVE_OUTFLOW)
+		{
+			const bool neg_inside = face.neg_cell >= 0;
+			const bool pos_inside = face.pos_cell >= 0;
+			if (neg_inside != pos_inside)
+			{
+				FlowVector U_inside = neg_inside ? Ustar_neg : Ustar_pos;
+				FlowVector U_outside = U_inside;
+				const NUMERIC_TYPE normal_momentum = face.axis == 0 ? U_inside.HU : U_inside.HV;
+				const NUMERIC_TYPE outward_momentum = (neg_inside ? C(1.0) : C(-1.0)) * normal_momentum;
+				if (outward_momentum < C(0.0))
+				{
+					if (face.axis == 0) U_outside.HU = -U_outside.HU;
+					else U_outside.HV = -U_outside.HV;
+				}
+				result.desired = neg_inside
+					? sparse_hll(face.axis, U_inside, U_outside)
+					: sparse_hll(face.axis, U_outside, U_inside);
+			}
+		}
+		else if (face.type == SPARSE_FACE_FIXED_FLUX)
+		{
+			result.desired = { face.p0, face.p1, face.p2 };
+		}
+		else if (face.type == SPARSE_FACE_WEIR && face.neg_cell >= 0 && face.pos_cell >= 0)
+		{
+			const NUMERIC_TYPE eta_neg = DEM[face.neg_g] + U_neg.H;
+			const NUMERIC_TYPE eta_pos = DEM[face.pos_g] + U_pos.H;
+			const bool neg_upstream = eta_neg >= eta_pos;
+			const NUMERIC_TYPE eta_up = neg_upstream ? eta_neg : eta_pos;
+			const NUMERIC_TYPE eta_down = neg_upstream ? eta_pos : eta_neg;
+			const FlowVector U_up = neg_upstream ? U_neg : U_pos;
+			const NUMERIC_TYPE crest = face.p0;
+			const NUMERIC_TYPE cw = FMAX(C(0.0), face.p1);
+			const NUMERIC_TYPE exponent = face.p2 > C(0.0) ? face.p2 : C(0.385);
+			const NUMERIC_TYPE width_fraction = face.p3 > C(0.0) ? face.p3 : C(1.0);
+			const NUMERIC_TYPE h_up = FMAX(C(0.0), eta_up - crest);
+			const NUMERIC_TYPE h_down = FMAX(C(0.0), eta_down - crest);
+			NUMERIC_TYPE q = C(0.0);
+			if (h_up > cuda::solver_params.DepthThresh && cw > C(0.0))
+			{
+				NUMERIC_TYPE qmag = width_fraction * cw * POW(h_up, C(1.5));
+				if (h_down > C(0.0))
+				{
+					const NUMERIC_TYPE ratio = FMIN(C(1.0), h_down / h_up);
+					const NUMERIC_TYPE sub = FMAX(C(0.0), C(1.0) - POW(ratio, C(1.5)));
+					qmag *= POW(sub, exponent);
+				}
+				q = neg_upstream ? qmag : -qmag;
+			}
+			const NUMERIC_TYPE h_flow = FMAX(h_up, cuda::solver_params.DepthThresh);
+			const NUMERIC_TYPE normal_velocity = q / h_flow;
+			NUMERIC_TYPE tangential_velocity = C(0.0);
+			if (U_up.H > cuda::solver_params.DepthThresh)
+				tangential_velocity = face.axis == 0 ? U_up.HV / U_up.H : U_up.HU / U_up.H;
+			result.desired.H = q;
+			if (face.axis == 0)
+			{
+				result.desired.HU = q * normal_velocity;
+				result.desired.HV = q * tangential_velocity;
+			}
+			else
+			{
+				result.desired.HU = q * tangential_velocity;
+				result.desired.HV = q * normal_velocity;
+			}
+		}
+		fluxes[n] = result;
+	}
+}
+
+__global__ void apply_sparse_face_fluxes
+(
+	Flow U,
+	const SparseFace* faces,
+	const SparseFaceFlux* fluxes,
+	int count,
+	MassStats* mass_stats
+)
+{
+	for (int n=blockIdx.x*blockDim.x+threadIdx.x; n<count; n+=blockDim.x*gridDim.x)
+	{
+		const SparseFace face = faces[n];
+		const SparseFaceFlux pair = fluxes[n];
+		const FlowVector dF = pair.desired - pair.base;
+		const NUMERIC_TYPE scale = cuda::dt / (face.axis == 0 ? cuda::geometry.dx : cuda::geometry.dy);
+		if (face.neg_cell >= 0)
+		{
+			atomicAdd(&U.H[face.neg_g], -scale * dF.H);
+			atomicAdd(&U.HU[face.neg_g], -scale * dF.HU);
+			atomicAdd(&U.HV[face.neg_g], -scale * dF.HV);
+		}
+		if (face.pos_cell >= 0)
+		{
+			atomicAdd(&U.H[face.pos_g], scale * dF.H);
+			atomicAdd(&U.HU[face.pos_g], scale * dF.HU);
+			atomicAdd(&U.HV[face.pos_g], scale * dF.HV);
+		}
+
+		if (mass_stats != nullptr && ((face.neg_cell >= 0) != (face.pos_cell >= 0)))
+		{
+			const bool neg_inside = face.neg_cell >= 0;
+			const NUMERIC_TYPE outward_sign = neg_inside ? C(1.0) : C(-1.0);
+			const NUMERIC_TYPE edge_length = face.axis == 0 ? cuda::geometry.dy : cuda::geometry.dx;
+			const NUMERIC_TYPE base_outward = outward_sign * pair.base.H * edge_length;
+			const NUMERIC_TYPE desired_outward = outward_sign * pair.desired.H * edge_length;
+			const NUMERIC_TYPE base_out = FMAX(C(0.0), base_outward);
+			const NUMERIC_TYPE base_in = FMAX(C(0.0), -base_outward);
+			const NUMERIC_TYPE desired_out = FMAX(C(0.0), desired_outward);
+			const NUMERIC_TYPE desired_in = FMAX(C(0.0), -desired_outward);
+			atomicAdd(&(mass_stats->out), desired_out - base_out);
+			atomicAdd(&(mass_stats->in), desired_in - base_in);
+		}
+	}
+}
+
 __global__ void update_dt_per_element
 (
 	NUMERIC_TYPE* dt,
@@ -444,6 +626,10 @@ Zstar_x(Zstar_x),
 Zstar_y(Zstar_y),
 manning(manning),
 negative_depth_volume(nullptr),
+sparse_faces(nullptr),
+sparse_fluxes(nullptr),
+sparse_face_count(0),
+sparse_flux_capacity(0),
 grid_size(grid_size)
 {
 	Flow::allocate_device(U1, geometry);
@@ -465,6 +651,25 @@ void lis::cuda::fv1::Solver::update_ghost_cells(cudaStream_t stream)
 			Uold, Zstar_x, Zstar_y);
 }
 
+void lis::cuda::fv1::Solver::clamp_negative_depths(cudaStream_t stream)
+{
+	clamp_negative_depths_kernel<<<grid_size, cuda::block_size, 0, stream>>>(
+			Uold, negative_depth_volume);
+}
+
+void lis::cuda::fv1::Solver::set_sparse_faces(const SparseFace* faces, int count)
+{
+	sparse_faces = faces;
+	sparse_face_count = count > 0 ? count : 0;
+	if (sparse_face_count > sparse_flux_capacity)
+	{
+		if (sparse_fluxes != nullptr) cuda::free_device(sparse_fluxes);
+		sparse_fluxes = static_cast<SparseFaceFlux*>(cuda::malloc_device(
+				static_cast<size_t>(sparse_face_count) * sizeof(SparseFaceFlux)));
+		sparse_flux_capacity = sparse_face_count;
+	}
+}
+
 lis::cuda::fv1::Flow& lis::cuda::fv1::Solver::update_flow_variables
 (
 	MassStats* mass_stats,
@@ -477,10 +682,24 @@ lis::cuda::fv1::Flow& lis::cuda::fv1::Solver::update_flow_variables
 		update_ghost_cells(stream);
 	}
 
+	if (sparse_face_count > 0 && sparse_faces != nullptr)
+	{
+		const int blocks = (sparse_face_count + CUDA_BLOCK_SIZE - 1) / CUDA_BLOCK_SIZE;
+		prepare_sparse_face_fluxes<<<blocks, CUDA_BLOCK_SIZE, 0, stream>>>(
+				Uold, DEM, Zstar_x, Zstar_y, sparse_faces, sparse_fluxes, sparse_face_count);
+	}
+
 	update_flow_variables_x<<<grid_size, cuda::block_size, 0, stream>>>
 			(Uold, Ux, DEM, Zstar_x, mass_stats, negative_depth_volume);
 	update_flow_variables_y<<<grid_size, cuda::block_size, 0, stream>>>
 			(Uold, Ux, U, DEM, Zstar_y, mass_stats, negative_depth_volume);
+
+	if (sparse_face_count > 0 && sparse_faces != nullptr)
+	{
+		const int blocks = (sparse_face_count + CUDA_BLOCK_SIZE - 1) / CUDA_BLOCK_SIZE;
+		apply_sparse_face_fluxes<<<blocks, CUDA_BLOCK_SIZE, 0, stream>>>(
+				U, sparse_faces, sparse_fluxes, sparse_face_count, mass_stats);
+	}
 	std::swap(Uold, U);
 	return Uold;
 }
@@ -537,4 +756,5 @@ lis::cuda::fv1::Solver::~Solver()
 	Flow::free_device(U1);
 	Flow::free_device(U2);
 	Flow::free_device(Ux);
+	if (sparse_fluxes != nullptr) cuda::free_device(sparse_fluxes);
 }
