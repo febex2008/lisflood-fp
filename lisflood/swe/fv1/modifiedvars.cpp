@@ -3,82 +3,83 @@
 void fv1::initialise_Zstar
 (
 	Pars *Parptr,
-	Arrays *Arrptr
+	Arrays *Arrptr,
+	const int *cell_mask
 )
 {
-	// internal x
+	// Internal x faces. A masked neighbour is replaced by a face ghost with
+	// the active cell bed elevation; fully masked faces are not used.
 #pragma omp parallel for
 	for (int j=0; j<Parptr->ysz; j++)
 	{
 		for(int i=1; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE Z_neg = Arrptr->DEM[j*Parptr->xsz + i-1];
-			NUMERIC_TYPE Z_pos = Arrptr->DEM[j*Parptr->xsz + i];
+			const size_t neg = static_cast<size_t>(j)*Parptr->xsz + i-1;
+			const size_t pos = neg + 1;
+			const bool neg_active = cell_mask == nullptr || cell_mask[neg] != 0;
+			const bool pos_active = cell_mask == nullptr || cell_mask[pos] != 0;
+			const NUMERIC_TYPE Z_neg = Arrptr->DEM[neg];
+			const NUMERIC_TYPE Z_pos = Arrptr->DEM[pos];
 			NUMERIC_TYPE& Zstar_x = Arrptr->Zstar_x[j*(Parptr->xsz+1) + i];
 
-			Zstar_x = getmax(Z_neg, Z_pos);
+			if (neg_active && pos_active) Zstar_x = getmax(Z_neg, Z_pos);
+			else if (neg_active) Zstar_x = Z_neg;
+			else if (pos_active) Zstar_x = Z_pos;
+			else Zstar_x = C(0.0);
 		}
 	}
 
-	// internal y
+	// Internal y faces.
 #pragma omp parallel for
 	for (int j=1; j<Parptr->ysz; j++)
 	{
 		for(int i=0; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE Z_neg = Arrptr->DEM[j*Parptr->xsz + i];
-			NUMERIC_TYPE Z_pos = Arrptr->DEM[(j-1)*Parptr->xsz + i];
+			const size_t neg = static_cast<size_t>(j)*Parptr->xsz + i;
+			const size_t pos = static_cast<size_t>(j-1)*Parptr->xsz + i;
+			const bool neg_active = cell_mask == nullptr || cell_mask[neg] != 0;
+			const bool pos_active = cell_mask == nullptr || cell_mask[pos] != 0;
+			const NUMERIC_TYPE Z_neg = Arrptr->DEM[neg];
+			const NUMERIC_TYPE Z_pos = Arrptr->DEM[pos];
 			NUMERIC_TYPE& Zstar_y = Arrptr->Zstar_y[j*(Parptr->xsz+1) + i];
 
-			Zstar_y = getmax(Z_neg, Z_pos);
+			if (neg_active && pos_active) Zstar_y = getmax(Z_neg, Z_pos);
+			else if (neg_active) Zstar_y = Z_neg;
+			else if (pos_active) Zstar_y = Z_pos;
+			else Zstar_y = C(0.0);
 		}
 	}
 
-	// west boundary
+	// Rectangular outer faces remain ordinary ghost boundaries where the
+	// adjacent cell is active.
 #pragma omp parallel for
 	for (int j=0; j<Parptr->ysz; j++)
 	{
-		const int i = 0;
-		NUMERIC_TYPE Z = Arrptr->DEM[j*Parptr->xsz + i];
-		NUMERIC_TYPE& Zstar_x = Arrptr->Zstar_x[j*(Parptr->xsz+1) + i];
-		Zstar_x = Z;
+		const size_t kw = static_cast<size_t>(j)*Parptr->xsz;
+		const size_t ke = kw + Parptr->xsz - 1;
+		Arrptr->Zstar_x[j*(Parptr->xsz+1)] =
+			(cell_mask == nullptr || cell_mask[kw] != 0) ? Arrptr->DEM[kw] : C(0.0);
+		Arrptr->Zstar_x[j*(Parptr->xsz+1) + Parptr->xsz] =
+			(cell_mask == nullptr || cell_mask[ke] != 0) ? Arrptr->DEM[ke] : C(0.0);
 	}
 
-	// east boundary
-#pragma omp parallel for
-	for (int j=0; j<Parptr->ysz; j++)
-	{
-		const int i = Parptr->xsz;
-		NUMERIC_TYPE Z = Arrptr->DEM[j*Parptr->xsz + i-1];
-		NUMERIC_TYPE& Zstar_x = Arrptr->Zstar_x[j*(Parptr->xsz+1) + i];
-		Zstar_x = Z;
-	}
-
-	// north boundary
 #pragma omp parallel for
 	for (int i=0; i<Parptr->xsz; i++)
 	{
-		const int j = 0;
-		NUMERIC_TYPE Z = Arrptr->DEM[j*Parptr->xsz + i];
-		NUMERIC_TYPE& Zstar_y = Arrptr->Zstar_y[j*(Parptr->xsz+1) + i];
-		Zstar_y = Z;
-	}
-
-	// south boundary
-#pragma omp parallel for
-	for (int i=0; i<Parptr->xsz; i++)
-	{
-		const int j = Parptr->ysz;
-		NUMERIC_TYPE Z = Arrptr->DEM[(j-1)*Parptr->xsz + i];
-		NUMERIC_TYPE& Zstar_y = Arrptr->Zstar_y[j*(Parptr->xsz+1) + i];
-		Zstar_y = Z;
+		const size_t kn = i;
+		const size_t ks = static_cast<size_t>(Parptr->ysz-1)*Parptr->xsz + i;
+		Arrptr->Zstar_y[i] =
+			(cell_mask == nullptr || cell_mask[kn] != 0) ? Arrptr->DEM[kn] : C(0.0);
+		Arrptr->Zstar_y[Parptr->ysz*(Parptr->xsz+1) + i] =
+			(cell_mask == nullptr || cell_mask[ks] != 0) ? Arrptr->DEM[ks] : C(0.0);
 	}
 }
 
 void fv1::update_Hstar
 (
 	Pars *Parptr,
-	Arrays *Arrptr
+	Arrays *Arrptr,
+	const int *cell_mask
 )
 {
 #pragma omp parallel for
@@ -86,10 +87,11 @@ void fv1::update_Hstar
 	{
 		for(int i=0; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
-			NUMERIC_TYPE Zstar_x = Arrptr->Zstar_x[j*(Parptr->xsz+1) + i+1];
-			NUMERIC_TYPE& Hstar_neg_x = Arrptr->Hstar_neg_x[j*Parptr->xsz + i];
-
+			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
+			NUMERIC_TYPE& Hstar_neg_x = Arrptr->Hstar_neg_x[k];
+			if (cell_mask != nullptr && cell_mask[k] == 0) { Hstar_neg_x = C(0.0); continue; }
+			const NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
+			const NUMERIC_TYPE Zstar_x = Arrptr->Zstar_x[j*(Parptr->xsz+1) + i+1];
 			Hstar_neg_x = getmax(C(0.0), ETA - Zstar_x);
 		}
 	}
@@ -99,10 +101,11 @@ void fv1::update_Hstar
 	{
 		for(int i=0; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
-			NUMERIC_TYPE Zstar_x = Arrptr->Zstar_x[j*(Parptr->xsz+1) + i];
-			NUMERIC_TYPE& Hstar_pos_x = Arrptr->Hstar_pos_x[j*Parptr->xsz + i];
-
+			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
+			NUMERIC_TYPE& Hstar_pos_x = Arrptr->Hstar_pos_x[k];
+			if (cell_mask != nullptr && cell_mask[k] == 0) { Hstar_pos_x = C(0.0); continue; }
+			const NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
+			const NUMERIC_TYPE Zstar_x = Arrptr->Zstar_x[j*(Parptr->xsz+1) + i];
 			Hstar_pos_x = getmax(C(0.0), ETA - Zstar_x);
 		}
 	}
@@ -112,10 +115,11 @@ void fv1::update_Hstar
 	{
 		for(int i=0; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
-			NUMERIC_TYPE Zstar_y = Arrptr->Zstar_y[j*(Parptr->xsz+1) + i];
-			NUMERIC_TYPE& Hstar_neg_y = Arrptr->Hstar_neg_y[j*Parptr->xsz + i];
-
+			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
+			NUMERIC_TYPE& Hstar_neg_y = Arrptr->Hstar_neg_y[k];
+			if (cell_mask != nullptr && cell_mask[k] == 0) { Hstar_neg_y = C(0.0); continue; }
+			const NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
+			const NUMERIC_TYPE Zstar_y = Arrptr->Zstar_y[j*(Parptr->xsz+1) + i];
 			Hstar_neg_y = getmax(C(0.0), ETA - Zstar_y);
 		}
 	}
@@ -125,10 +129,11 @@ void fv1::update_Hstar
 	{
 		for(int i=0; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
-			NUMERIC_TYPE Zstar_y = Arrptr->Zstar_y[(j+1)*(Parptr->xsz+1) + i];
-			NUMERIC_TYPE& Hstar_pos_y = Arrptr->Hstar_pos_y[j*Parptr->xsz + i];
-
+			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
+			NUMERIC_TYPE& Hstar_pos_y = Arrptr->Hstar_pos_y[k];
+			if (cell_mask != nullptr && cell_mask[k] == 0) { Hstar_pos_y = C(0.0); continue; }
+			const NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
+			const NUMERIC_TYPE Zstar_y = Arrptr->Zstar_y[(j+1)*(Parptr->xsz+1) + i];
 			Hstar_pos_y = getmax(C(0.0), ETA - Zstar_y);
 		}
 	}

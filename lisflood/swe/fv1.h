@@ -37,14 +37,16 @@ namespace fv1
 	(
 		Pars *Parptr,
 		Solver *Solverptr,
-		Arrays *Arrptr
+		Arrays *Arrptr,
+		const int *cell_mask = nullptr
 	);
 
 	void update_fluxes
 	(
 		Pars *Parptr,
 		Solver *Solverptr,
-		Arrays *Arrptr
+		Arrays *Arrptr,
+		const int *cell_mask = nullptr
 	);
 
 	void update_fluxes_on_boundaries
@@ -52,14 +54,16 @@ namespace fv1
 		Pars *Parptr,
 		Solver *Solverptr,
 		BoundCs *BCptr,
-		Arrays *Arrptr
+		Arrays *Arrptr,
+		const int *cell_mask = nullptr
 	);
 
 	void update_flow_variables
 	(
 		Pars *Parptr,
 		Solver *Solverptr,
-		Arrays *Arrptr
+		Arrays *Arrptr,
+		const int *cell_mask = nullptr
 	);
 
 	void set_boundary_values
@@ -84,7 +88,8 @@ namespace fv1
 	(
 		Pars *Parptr,
 		Solver *Solverptr,
-		Arrays *Arrptr
+		Arrays *Arrptr,
+		const int *cell_mask = nullptr
 	);
 
 	NUMERIC_TYPE bed_source_x

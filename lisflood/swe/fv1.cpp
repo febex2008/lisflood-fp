@@ -105,7 +105,8 @@ void fv1::apply_friction
 (
 	Pars *Parptr,
 	Solver *Solverptr,
-	Arrays *Arrptr
+	Arrays *Arrptr,
+	const int *cell_mask
 )
 {
 	if (Arrptr->Manningsn == nullptr && Parptr->FPn <= C(0.0)) return;
@@ -115,7 +116,9 @@ void fv1::apply_friction
 	{
 		for(int i=0; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE H = Arrptr->H[j*Parptr->xsz + i];
+			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
+			if (cell_mask != nullptr && cell_mask[k] == 0) continue;
+			NUMERIC_TYPE H = Arrptr->H[k];
 			NUMERIC_TYPE& HU = Arrptr->HU[j*Parptr->xsz + i];
 			NUMERIC_TYPE& HV = Arrptr->HV[j*Parptr->xsz + i];
 
@@ -251,7 +254,8 @@ void fv1::update_fluxes
 (
 	Pars *Parptr,
 	Solver *Solverptr,
-	Arrays *Arrptr
+	Arrays *Arrptr,
+	const int *cell_mask
 )
 {
 #pragma omp parallel for
@@ -259,7 +263,17 @@ void fv1::update_fluxes
 	{
 		for(int i=1; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE H_neg = Arrptr->Hstar_neg_x[j*Parptr->xsz + i-1];
+			const size_t neg_k = static_cast<size_t>(j)*Parptr->xsz + i-1;
+			const size_t pos_k = neg_k + 1;
+			NUMERIC_TYPE& FHx = Arrptr->FHx[j*(Parptr->xsz+1) + i];
+			NUMERIC_TYPE& FHUx = Arrptr->FHUx[j*(Parptr->xsz+1) + i];
+			NUMERIC_TYPE& FHVx = Arrptr->FHVx[j*(Parptr->xsz+1) + i];
+			if (cell_mask != nullptr && (cell_mask[neg_k] == 0 || cell_mask[pos_k] == 0))
+			{
+				FHx = FHUx = FHVx = C(0.0);
+				continue;
+			}
+			NUMERIC_TYPE H_neg = Arrptr->Hstar_neg_x[neg_k];
 			NUMERIC_TYPE HU_neg = HUstar_neg_x(
 					Parptr, Solverptr, Arrptr, i-1, j);
 			NUMERIC_TYPE HV_neg = HVstar_neg_x(
@@ -268,10 +282,6 @@ void fv1::update_fluxes
 			NUMERIC_TYPE H_pos = Arrptr->Hstar_pos_x[j*Parptr->xsz + i];
 			NUMERIC_TYPE HU_pos = HUstar_pos_x(Parptr, Solverptr, Arrptr, i, j);
 			NUMERIC_TYPE HV_pos = HVstar_pos_x(Parptr, Solverptr, Arrptr, i, j);
-
-			NUMERIC_TYPE& FHx = Arrptr->FHx[j*(Parptr->xsz+1) + i];
-			NUMERIC_TYPE& FHUx = Arrptr->FHUx[j*(Parptr->xsz+1) + i];
-			NUMERIC_TYPE& FHVx = Arrptr->FHVx[j*(Parptr->xsz+1) + i];
 
 			HLL_x(Solverptr, H_neg, HU_neg, HV_neg, H_pos, HU_pos, HV_pos,
 				FHx, FHUx, FHVx);
@@ -283,7 +293,17 @@ void fv1::update_fluxes
 	{
 		for(int i=0; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE H_neg = Arrptr->Hstar_neg_y[j*Parptr->xsz + i];
+			const size_t neg_k = static_cast<size_t>(j)*Parptr->xsz + i;
+			const size_t pos_k = static_cast<size_t>(j-1)*Parptr->xsz + i;
+			NUMERIC_TYPE& FHy = Arrptr->FHy[j*(Parptr->xsz+1) + i];
+			NUMERIC_TYPE& FHUy = Arrptr->FHUy[j*(Parptr->xsz+1) + i];
+			NUMERIC_TYPE& FHVy = Arrptr->FHVy[j*(Parptr->xsz+1) + i];
+			if (cell_mask != nullptr && (cell_mask[neg_k] == 0 || cell_mask[pos_k] == 0))
+			{
+				FHy = FHUy = FHVy = C(0.0);
+				continue;
+			}
+			NUMERIC_TYPE H_neg = Arrptr->Hstar_neg_y[neg_k];
 			NUMERIC_TYPE HU_neg = HUstar_neg_y(Parptr, Solverptr, Arrptr, i, j);
 			NUMERIC_TYPE HV_neg = HVstar_neg_y(Parptr, Solverptr, Arrptr, i, j);
 
@@ -292,10 +312,6 @@ void fv1::update_fluxes
 					Parptr, Solverptr, Arrptr, i, j-1);
 			NUMERIC_TYPE HV_pos = HVstar_pos_y(
 					Parptr, Solverptr, Arrptr, i, j-1);
-
-			NUMERIC_TYPE& FHy = Arrptr->FHy[j*(Parptr->xsz+1) + i];
-			NUMERIC_TYPE& FHUy = Arrptr->FHUy[j*(Parptr->xsz+1) + i];
-			NUMERIC_TYPE& FHVy = Arrptr->FHVy[j*(Parptr->xsz+1) + i];
 
 			HLL_y(Solverptr, H_neg, HU_neg, HV_neg, H_pos, HU_pos, HV_pos,
 					FHy, FHUy, FHVy);
@@ -308,7 +324,8 @@ void fv1::update_fluxes_on_boundaries
 	Pars *Parptr,
 	Solver *Solverptr,
 	BoundCs *BCptr,
-	Arrays *Arrptr
+	Arrays *Arrptr,
+	const int *cell_mask
 )
 {
 	// west
@@ -316,6 +333,12 @@ void fv1::update_fluxes_on_boundaries
 	for (int j=0; j<Parptr->ysz; j++)
 	{
 		const int i = 0;
+		if (cell_mask != nullptr && cell_mask[static_cast<size_t>(j)*Parptr->xsz] == 0)
+		{
+			const size_t f = static_cast<size_t>(j)*(Parptr->xsz+1);
+			Arrptr->FHx[f] = Arrptr->FHUx[f] = Arrptr->FHVx[f] = C(0.0);
+			continue;
+		}
 		NUMERIC_TYPE H_inside = Arrptr->Hstar_pos_x[j*Parptr->xsz + i];
 		NUMERIC_TYPE HU_inside = HUstar_pos_x(Parptr, Solverptr, Arrptr, i, j);
 		NUMERIC_TYPE HV_inside = HVstar_pos_x(Parptr, Solverptr, Arrptr, i, j);
@@ -345,6 +368,12 @@ void fv1::update_fluxes_on_boundaries
 	for (int j=0; j<Parptr->ysz; j++)
 	{
 		const int i = Parptr->xsz;
+		if (cell_mask != nullptr && cell_mask[static_cast<size_t>(j)*Parptr->xsz + Parptr->xsz-1] == 0)
+		{
+			const size_t f = static_cast<size_t>(j)*(Parptr->xsz+1) + Parptr->xsz;
+			Arrptr->FHx[f] = Arrptr->FHUx[f] = Arrptr->FHVx[f] = C(0.0);
+			continue;
+		}
 		NUMERIC_TYPE H_inside = Arrptr->Hstar_neg_x[j*Parptr->xsz + i-1];
 		NUMERIC_TYPE HU_inside = HUstar_neg_x(
 				Parptr, Solverptr, Arrptr, i-1, j);
@@ -376,6 +405,12 @@ void fv1::update_fluxes_on_boundaries
 	for (int i=0; i<Parptr->xsz; i++)
 	{
 		const int j = 0;
+		if (cell_mask != nullptr && cell_mask[i] == 0)
+		{
+			const size_t f = static_cast<size_t>(i);
+			Arrptr->FHy[f] = Arrptr->FHUy[f] = Arrptr->FHVy[f] = C(0.0);
+			continue;
+		}
 		NUMERIC_TYPE H_inside = Arrptr->Hstar_neg_y[j*Parptr->xsz + i];
 		NUMERIC_TYPE HU_inside = HUstar_neg_y(Parptr, Solverptr, Arrptr, i, j);
 		NUMERIC_TYPE HV_inside = HVstar_neg_y(Parptr, Solverptr, Arrptr, i, j);
@@ -405,6 +440,12 @@ void fv1::update_fluxes_on_boundaries
 	for (int i=0; i<Parptr->xsz; i++)
 	{
 		const int j = Parptr->ysz;
+		if (cell_mask != nullptr && cell_mask[static_cast<size_t>(Parptr->ysz-1)*Parptr->xsz + i] == 0)
+		{
+			const size_t f = static_cast<size_t>(Parptr->ysz)*(Parptr->xsz+1) + i;
+			Arrptr->FHy[f] = Arrptr->FHUy[f] = Arrptr->FHVy[f] = C(0.0);
+			continue;
+		}
 		NUMERIC_TYPE H_inside = Arrptr->Hstar_pos_y[(j-1)*Parptr->xsz + i];
 		NUMERIC_TYPE HU_inside = HUstar_pos_y(
 				Parptr, Solverptr, Arrptr, i, j-1);
@@ -436,7 +477,8 @@ void fv1::update_flow_variables
 (
 	Pars *Parptr,
 	Solver *Solverptr,
-	Arrays *Arrptr
+	Arrays *Arrptr,
+	const int *cell_mask
 )
 {
 #pragma omp parallel for
@@ -444,7 +486,9 @@ void fv1::update_flow_variables
 	{
 		for(int i=0; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE& H = Arrptr->H[j*Parptr->xsz + i];
+			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
+			if (cell_mask != nullptr && cell_mask[k] == 0) continue;
+			NUMERIC_TYPE& H = Arrptr->H[k];
 			NUMERIC_TYPE H_w = Arrptr->FHx[j*(Parptr->xsz+1) + i];
 			NUMERIC_TYPE H_e = Arrptr->FHx[j*(Parptr->xsz+1) + i+1];
 			NUMERIC_TYPE H_n = Arrptr->FHy[j*(Parptr->xsz+1) + i];
@@ -604,7 +648,8 @@ NUMERIC_TYPE fv1::Tstep_from_cfl
 (
 	Pars *Parptr,
 	Solver *Solverptr,
-	Arrays *Arrptr
+	Arrays *Arrptr,
+	const int *cell_mask
 )
 {
 	NUMERIC_TYPE dt = Solverptr->InitTstep;
@@ -615,7 +660,9 @@ NUMERIC_TYPE fv1::Tstep_from_cfl
 	{
 		for(int i=0; i<Parptr->xsz; i++)
 		{
-			NUMERIC_TYPE H = Arrptr->H[j*Parptr->xsz + i];
+			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
+			if (cell_mask != nullptr && cell_mask[k] == 0) continue;
+			NUMERIC_TYPE H = Arrptr->H[k];
 			if (H > Solverptr->DepthThresh)
 			{
 				NUMERIC_TYPE HU = Arrptr->HU[j*Parptr->xsz + i];

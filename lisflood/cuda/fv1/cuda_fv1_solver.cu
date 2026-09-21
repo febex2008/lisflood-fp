@@ -61,10 +61,63 @@ __global__ void zero_ghost_cells_east_west
 	}
 }
 
+__device__ inline bool active_cell(const int* cell_mask, int i, int j)
+{
+	if (i < 1 || i > cuda::geometry.xsz || j < 1 || j > cuda::geometry.ysz) return false;
+	if (cell_mask == nullptr) return true;
+	const int k = (j-1)*cuda::geometry.xsz + (i-1);
+	return cell_mask[k] != 0;
+}
+
+__global__ void apply_mask_to_zstar_x
+(
+	NUMERIC_TYPE* DEM,
+	NUMERIC_TYPE* Zstar_x,
+	const int* cell_mask
+)
+{
+	int global_i = blockIdx.x*blockDim.x + threadIdx.x;
+	int global_j = blockIdx.y*blockDim.y + threadIdx.y;
+	for (int j=global_j+1; j<=cuda::geometry.ysz; j+=blockDim.y*gridDim.y)
+	{
+		for (int i=global_i+1; i<cuda::geometry.xsz; i+=blockDim.x*gridDim.x)
+		{
+			const bool neg_active = active_cell(cell_mask, i, j);
+			const bool pos_active = active_cell(cell_mask, i+1, j);
+			if (neg_active == pos_active) continue;
+			const int g = j*cuda::pitch + i;
+			Zstar_x[g] = neg_active ? DEM[g] : DEM[g+1];
+		}
+	}
+}
+
+__global__ void apply_mask_to_zstar_y
+(
+	NUMERIC_TYPE* DEM,
+	NUMERIC_TYPE* Zstar_y,
+	const int* cell_mask
+)
+{
+	int global_i = blockIdx.x*blockDim.x + threadIdx.x;
+	int global_j = blockIdx.y*blockDim.y + threadIdx.y;
+	for (int j=global_j+1; j<cuda::geometry.ysz; j+=blockDim.y*gridDim.y)
+	{
+		for (int i=global_i+1; i<=cuda::geometry.xsz; i+=blockDim.x*gridDim.x)
+		{
+			const bool pos_active = active_cell(cell_mask, i, j);
+			const bool neg_active = active_cell(cell_mask, i, j+1);
+			if (neg_active == pos_active) continue;
+			const int g = j*cuda::pitch + i;
+			Zstar_y[g] = neg_active ? DEM[g+cuda::pitch] : DEM[g];
+		}
+	}
+}
+
 __global__ void clamp_negative_depths_kernel
 (
 	Flow U,
-	NUMERIC_TYPE* negative_depth_volume
+	NUMERIC_TYPE* negative_depth_volume,
+	const int* cell_mask
 )
 {
 	int global_i = blockIdx.x*blockDim.x + threadIdx.x;
@@ -74,6 +127,7 @@ __global__ void clamp_negative_depths_kernel
 		for (int i=global_i+1; i<cuda::geometry.xsz+1; i+=blockDim.x*gridDim.x)
 		{
 			const int k = j*cuda::pitch + i;
+			if (!active_cell(cell_mask, i, j)) continue;
 			NUMERIC_TYPE& H = U.H[k];
 			NUMERIC_TYPE& HU = U.HU[k];
 			NUMERIC_TYPE& HV = U.HV[k];
@@ -130,6 +184,43 @@ __global__ void prepare_sparse_face_fluxes
 	for (int n=blockIdx.x*blockDim.x+threadIdx.x; n<count; n+=blockDim.x*gridDim.x)
 	{
 		const SparseFace face = faces[n];
+		const bool boundary_face =
+			face.type == SPARSE_FACE_TRANSMISSIVE_OUTFLOW ||
+			face.type == SPARSE_FACE_FREE || face.type == SPARSE_FACE_CLOSED;
+		const bool neg_inside = face.neg_cell >= 0;
+		const bool pos_inside = face.pos_cell >= 0;
+		const bool masked_boundary = boundary_face && (neg_inside != pos_inside) && face.p3 > C(0.5);
+
+		if (masked_boundary)
+		{
+			SparseFaceFlux result;
+			result.base = { C(0.0), C(0.0), C(0.0) };
+			FlowVector U_inside = neg_inside ? Uold[face.neg_g] : Uold[face.pos_g];
+			FlowVector U_outside = U_inside;
+			if (face.type == SPARSE_FACE_CLOSED)
+			{
+				if (face.axis == 0) U_outside.HU = -U_outside.HU;
+				else U_outside.HV = -U_outside.HV;
+			}
+			else if (face.type == SPARSE_FACE_TRANSMISSIVE_OUTFLOW)
+			{
+				const NUMERIC_TYPE normal_momentum = face.axis == 0 ? U_inside.HU : U_inside.HV;
+				const NUMERIC_TYPE outward_momentum = (neg_inside ? C(1.0) : C(-1.0)) * normal_momentum;
+				if (outward_momentum < C(0.0))
+				{
+					if (face.axis == 0) U_outside.HU = -U_outside.HU;
+					else U_outside.HV = -U_outside.HV;
+				}
+			}
+			const FlowVector desired = neg_inside
+				? sparse_hll(face.axis, U_inside, U_outside)
+				: sparse_hll(face.axis, U_outside, U_inside);
+			result.desired_neg = desired;
+			result.desired_pos = desired;
+			fluxes[n] = result;
+			continue;
+		}
+
 		const NUMERIC_TYPE Zstar = face.axis == 0 ? Zstar_x[face.face_g] : Zstar_y[face.face_g];
 		const FlowVector U_neg = Uold[face.neg_g];
 		const FlowVector U_pos = Uold[face.pos_g];
@@ -140,17 +231,11 @@ __global__ void prepare_sparse_face_fluxes
 		result.desired_neg = result.base;
 		result.desired_pos = result.base;
 
-		if (face.type == SPARSE_FACE_TRANSMISSIVE_OUTFLOW ||
-			face.type == SPARSE_FACE_FREE || face.type == SPARSE_FACE_CLOSED)
+		if (boundary_face)
 		{
-			const bool neg_inside = face.neg_cell >= 0;
-			const bool pos_inside = face.pos_cell >= 0;
 			if (neg_inside != pos_inside)
 			{
-				const bool internal_domain = face.p3 > C(0.5);
-				FlowVector U_inside = internal_domain
-					? (neg_inside ? U_neg : U_pos)
-					: (neg_inside ? Ustar_neg : Ustar_pos);
+				FlowVector U_inside = neg_inside ? Ustar_neg : Ustar_pos;
 				FlowVector U_outside = U_inside;
 				if (face.type == SPARSE_FACE_CLOSED)
 				{
@@ -309,7 +394,8 @@ __global__ void apply_sparse_face_fluxes
 __global__ void update_dt_per_element
 (
 	NUMERIC_TYPE* dt,
-	Flow U
+	Flow U,
+	const int* cell_mask
 )
 {
 	int global_i = blockIdx.x*blockDim.x + threadIdx.x;
@@ -319,6 +405,11 @@ __global__ void update_dt_per_element
 	{
 		for (int i=global_i; i<cuda::pitch; i+=blockDim.x*gridDim.x)
 		{
+			if (cell_mask != nullptr && !active_cell(cell_mask, i, j))
+			{
+				dt[j*cuda::pitch + i] = cuda::solver_params.max_dt;
+				continue;
+			}
 			NUMERIC_TYPE H = U.H[j*cuda::pitch + i];
 
 			if (H > cuda::solver_params.DepthThresh)
@@ -348,7 +439,8 @@ void update_uniform_rain_func
 (
 	Flow U,
 	NUMERIC_TYPE* DEM,
-	NUMERIC_TYPE  rain_rate
+	NUMERIC_TYPE  rain_rate,
+	const int* cell_mask
 )
 {
 	int global_i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -358,6 +450,12 @@ void update_uniform_rain_func
 	{
 		for (int i = global_i; i < cuda::pitch; i += blockDim.x * gridDim.x)
 		{
+			if (cell_mask != nullptr)
+			{
+				if (i < 1 || i > cuda::geometry.xsz || j < 1 || j > cuda::geometry.ysz) continue;
+				const int cls = cell_mask[(j-1)*cuda::geometry.xsz + (i-1)];
+				if (cls == 0 || cls == 2) continue;
+			}
 			NUMERIC_TYPE cell_rain;
 
 			cell_rain = rain_rate * cuda::dt;
@@ -379,7 +477,8 @@ __global__ void update_ghost_cells
 (
 	Flow U,
 	NUMERIC_TYPE* Zstar_x,
-	NUMERIC_TYPE* Zstar_y
+	NUMERIC_TYPE* Zstar_y,
+	const int* cell_mask
 )
 {
 	for (int j=blockIdx.x*blockDim.x+threadIdx.x+1; j<cuda::geometry.ysz+1;
@@ -387,6 +486,12 @@ __global__ void update_ghost_cells
 	{
 		{
 			int i = 1;
+			if (!active_cell(cell_mask, i, j))
+			{
+				U.H[j*cuda::pitch] = U.HU[j*cuda::pitch] = U.HV[j*cuda::pitch] = C(0.0);
+			}
+			else
+			{
 			NUMERIC_TYPE Zstar = Zstar_x[j*cuda::pitch + i-1];
 			FlowVector U_inside = U[j*cuda::pitch + i];
 			FlowVector U_outside = Boundary::outside_x(U_inside, U_inside,
@@ -394,9 +499,17 @@ __global__ void update_ghost_cells
 			U.H[j*cuda::pitch + i-1] = U_outside.H;
 			U.HU[j*cuda::pitch + i-1] = U_outside.HU;
 			U.HV[j*cuda::pitch + i-1] = U_outside.HV;
+			}
 		}
 		{
 			int i = cuda::geometry.xsz;
+			if (!active_cell(cell_mask, i, j))
+			{
+				const int g = j*cuda::pitch + i+1;
+				U.H[g] = U.HU[g] = U.HV[g] = C(0.0);
+			}
+			else
+			{
 			NUMERIC_TYPE Zstar = Zstar_x[j*cuda::pitch + i];
 			FlowVector U_inside = U[j*cuda::pitch + i];
 			FlowVector U_outside = Boundary::outside_x(U_inside, U_inside,
@@ -404,6 +517,7 @@ __global__ void update_ghost_cells
 			U.H[j*cuda::pitch + i+1] = U_outside.H;
 			U.HU[j*cuda::pitch + i+1] = U_outside.HU;
 			U.HV[j*cuda::pitch + i+1] = U_outside.HV;
+			}
 		}
 	}
 
@@ -412,6 +526,13 @@ __global__ void update_ghost_cells
 	{
 		{
 			int j = 1;
+			if (!active_cell(cell_mask, i, j))
+			{
+				const int g = (j-1)*cuda::pitch + i;
+				U.H[g] = U.HU[g] = U.HV[g] = C(0.0);
+			}
+			else
+			{
 			NUMERIC_TYPE Zstar = Zstar_y[(j-1)*cuda::pitch + i];
 			FlowVector U_inside = U[j*cuda::pitch + i];
 			FlowVector U_outside = Boundary::outside_y(U_inside, U_inside,
@@ -419,9 +540,17 @@ __global__ void update_ghost_cells
 			U.H[(j-1)*cuda::pitch + i] = U_outside.H;
 			U.HU[(j-1)*cuda::pitch + i] = U_outside.HU;
 			U.HV[(j-1)*cuda::pitch + i] = U_outside.HV;
+			}
 		}
 		{
 			int j = cuda::geometry.ysz;
+			if (!active_cell(cell_mask, i, j))
+			{
+				const int g = (j+1)*cuda::pitch + i;
+				U.H[g] = U.HU[g] = U.HV[g] = C(0.0);
+			}
+			else
+			{
 			NUMERIC_TYPE Zstar = Zstar_y[j*cuda::pitch + i];
 			FlowVector U_inside = U[j*cuda::pitch + i];
 			FlowVector U_outside = Boundary::outside_y(U_inside, U_inside,
@@ -429,6 +558,7 @@ __global__ void update_ghost_cells
 			U.H[(j+1)*cuda::pitch + i] = U_outside.H;
 			U.HU[(j+1)*cuda::pitch + i] = U_outside.HU;
 			U.HV[(j+1)*cuda::pitch + i] = U_outside.HV;
+			}
 		}
 	}
 }
@@ -438,7 +568,8 @@ __launch_bounds__(CUDA_BLOCK_SIZE)
 apply_friction
 (
 	Flow U,
-	NUMERIC_TYPE* manning
+	NUMERIC_TYPE* manning,
+	const int* cell_mask
 )
 {
 	int global_i = blockIdx.x*blockDim.x + threadIdx.x;
@@ -448,6 +579,7 @@ apply_friction
 	{
 		for (int i=global_i+1; i<cuda::geometry.xsz+1; i+=blockDim.x*gridDim.x)
 		{
+			if (!active_cell(cell_mask, i, j)) continue;
 			NUMERIC_TYPE H = U.H[j*cuda::pitch + i];
 			NUMERIC_TYPE& HU = U.HU[j*cuda::pitch + i];
 			NUMERIC_TYPE& HV = U.HV[j*cuda::pitch + i];
@@ -528,7 +660,8 @@ update_flow_variables_x
 	NUMERIC_TYPE* DEM,
 	NUMERIC_TYPE* Zstar_x,
 	MassStats* mass_stats,
-	NUMERIC_TYPE* negative_depth_volume
+	NUMERIC_TYPE* negative_depth_volume,
+	const int* cell_mask
 )
 {
 	__shared__ FlowVector F[CUDA_BLOCK_SIZE_Y][CUDA_BLOCK_SIZE_X];
@@ -550,18 +683,45 @@ update_flow_variables_x
 			if (i <= cuda::geometry.xsz && j <= cuda::geometry.ysz)
 			{
 				Zstar_e = Zstar_x[j*cuda::pitch + i];
-				Z_neg = DEM[j*cuda::pitch + i];
-				U_neg = Uold[j*cuda::pitch + i];
-				Ustar_neg = U_neg.star(Z_neg, Zstar_e);
-				NUMERIC_TYPE Z_pos = DEM[j*cuda::pitch + i+1];
-				FlowVector U_pos = Uold[j*cuda::pitch + i+1];
-				FlowVector Ustar_pos = U_pos.star(Z_pos, Zstar_e);
-				if (i == 0)
-					Ustar_pos = Boundary::inside_x(Ustar_neg, Ustar_pos, Ustar_pos, Boundary::index_w(i, j));
-				else if (i == cuda::geometry.xsz)
-					Ustar_neg = Boundary::inside_x(Ustar_pos, Ustar_neg, Ustar_neg, Boundary::index_e(i, j));
-				Hstar[threadIdx.y][threadIdx.x] = Ustar_pos.H;
-				F_e = HLL::x(Ustar_neg, Ustar_pos);
+				const bool neg_active = i > 0 && active_cell(cell_mask, i, j);
+				const bool pos_active = i < cuda::geometry.xsz && active_cell(cell_mask, i+1, j);
+				const bool outer_active = (i == 0 && pos_active) ||
+					(i == cuda::geometry.xsz && neg_active);
+				const bool internal_active = i > 0 && i < cuda::geometry.xsz &&
+					neg_active && pos_active;
+
+				if (internal_active || outer_active)
+				{
+					Z_neg = DEM[j*cuda::pitch + i];
+					U_neg = Uold[j*cuda::pitch + i];
+					Ustar_neg = U_neg.star(Z_neg, Zstar_e);
+					NUMERIC_TYPE Z_pos = DEM[j*cuda::pitch + i+1];
+					FlowVector U_pos = Uold[j*cuda::pitch + i+1];
+					FlowVector Ustar_pos = U_pos.star(Z_pos, Zstar_e);
+					if (i == 0)
+						Ustar_pos = Boundary::inside_x(Ustar_neg, Ustar_pos, Ustar_pos, Boundary::index_w(i, j));
+					else if (i == cuda::geometry.xsz)
+						Ustar_neg = Boundary::inside_x(Ustar_pos, Ustar_neg, Ustar_neg, Boundary::index_e(i, j));
+					Hstar[threadIdx.y][threadIdx.x] = Ustar_pos.H;
+					F_e = HLL::x(Ustar_neg, Ustar_pos);
+				}
+				else
+				{
+					F_e = { C(0.0), C(0.0), C(0.0) };
+					Hstar[threadIdx.y][threadIdx.x] = C(0.0);
+					if (neg_active)
+					{
+						Z_neg = DEM[j*cuda::pitch + i];
+						U_neg = Uold[j*cuda::pitch + i];
+						Ustar_neg = U_neg.star(Z_neg, Zstar_e);
+					}
+					if (pos_active)
+					{
+						const NUMERIC_TYPE Z_pos = DEM[j*cuda::pitch + i+1];
+						const FlowVector U_pos = Uold[j*cuda::pitch + i+1];
+						Hstar[threadIdx.y][threadIdx.x] = U_pos.star(Z_pos, Zstar_e).H;
+					}
+				}
 				F[threadIdx.y][threadIdx.x] = F_e;
 			}
 			__syncthreads();
@@ -575,6 +735,13 @@ update_flow_variables_x
 			if (threadIdx.x == 0) continue;
 			if (i <= cuda::geometry.xsz && j <= cuda::geometry.ysz)
 			{
+				if (!active_cell(cell_mask, i, j))
+				{
+					U.H[j*cuda::pitch + i] = C(0.0);
+					U.HU[j*cuda::pitch + i] = C(0.0);
+					U.HV[j*cuda::pitch + i] = C(0.0);
+					continue;
+				}
 				FlowVector& F_w = F[threadIdx.y][threadIdx.x-1];
 				FlowVector U0 = Uold[j*cuda::pitch + i];
 				NUMERIC_TYPE& H = U.H[j*cuda::pitch + i];
@@ -602,7 +769,8 @@ update_flow_variables_y
 	NUMERIC_TYPE* DEM,
 	NUMERIC_TYPE* Zstar_y,
 	MassStats* mass_stats,
-	NUMERIC_TYPE* negative_depth_volume
+	NUMERIC_TYPE* negative_depth_volume,
+	const int* cell_mask
 )
 {
 	__shared__ FlowVector F[CUDA_BLOCK_SIZE_Y][CUDA_BLOCK_SIZE_X];
@@ -624,18 +792,45 @@ update_flow_variables_y
 			if (i <= cuda::geometry.xsz && j <= cuda::geometry.ysz)
 			{
 				Zstar_s = Zstar_y[j*cuda::pitch + i];
-				NUMERIC_TYPE Z_neg = DEM[(j+1)*cuda::pitch + i];
-				FlowVector U_neg = Uold[(j+1)*cuda::pitch + i];
-				FlowVector Ustar_neg = U_neg.star(Z_neg, Zstar_s);
-				Z_pos = DEM[j*cuda::pitch + i];
-				U_pos = Uold[j*cuda::pitch + i];
-				Ustar_pos = U_pos.star(Z_pos, Zstar_s);
-				if (j == 0)
-					Ustar_neg = Boundary::inside_y(Ustar_pos, Ustar_neg, Ustar_neg, Boundary::index_n(i, j));
-				else if (j == cuda::geometry.ysz)
-					Ustar_pos = Boundary::inside_y(Ustar_neg, Ustar_pos, Ustar_pos, Boundary::index_s(i, j));
-				Hstar[threadIdx.y][threadIdx.x] = Ustar_neg.H;
-				F_s = HLL::y(Ustar_neg, Ustar_pos);
+				const bool pos_active = j > 0 && active_cell(cell_mask, i, j);
+				const bool neg_active = j < cuda::geometry.ysz && active_cell(cell_mask, i, j+1);
+				const bool outer_active = (j == 0 && neg_active) ||
+					(j == cuda::geometry.ysz && pos_active);
+				const bool internal_active = j > 0 && j < cuda::geometry.ysz &&
+					neg_active && pos_active;
+
+				if (internal_active || outer_active)
+				{
+					NUMERIC_TYPE Z_neg = DEM[(j+1)*cuda::pitch + i];
+					FlowVector U_neg = Uold[(j+1)*cuda::pitch + i];
+					FlowVector Ustar_neg = U_neg.star(Z_neg, Zstar_s);
+					Z_pos = DEM[j*cuda::pitch + i];
+					U_pos = Uold[j*cuda::pitch + i];
+					Ustar_pos = U_pos.star(Z_pos, Zstar_s);
+					if (j == 0)
+						Ustar_neg = Boundary::inside_y(Ustar_pos, Ustar_neg, Ustar_neg, Boundary::index_n(i, j));
+					else if (j == cuda::geometry.ysz)
+						Ustar_pos = Boundary::inside_y(Ustar_neg, Ustar_pos, Ustar_pos, Boundary::index_s(i, j));
+					Hstar[threadIdx.y][threadIdx.x] = Ustar_neg.H;
+					F_s = HLL::y(Ustar_neg, Ustar_pos);
+				}
+				else
+				{
+					F_s = { C(0.0), C(0.0), C(0.0) };
+					Hstar[threadIdx.y][threadIdx.x] = C(0.0);
+					if (pos_active)
+					{
+						Z_pos = DEM[j*cuda::pitch + i];
+						U_pos = Uold[j*cuda::pitch + i];
+						Ustar_pos = U_pos.star(Z_pos, Zstar_s);
+					}
+					if (neg_active)
+					{
+						const NUMERIC_TYPE Z_neg = DEM[(j+1)*cuda::pitch + i];
+						const FlowVector U_neg = Uold[(j+1)*cuda::pitch + i];
+						Hstar[threadIdx.y][threadIdx.x] = U_neg.star(Z_neg, Zstar_s).H;
+					}
+				}
 				F[threadIdx.y][threadIdx.x] = F_s;
 			}
 			__syncthreads();
@@ -649,6 +844,13 @@ update_flow_variables_y
 			if (threadIdx.y == 0) continue;
 			if (i <= cuda::geometry.xsz && j <= cuda::geometry.ysz)
 			{
+				if (!active_cell(cell_mask, i, j))
+				{
+					U.H[j*cuda::pitch + i] = C(0.0);
+					U.HU[j*cuda::pitch + i] = C(0.0);
+					U.HV[j*cuda::pitch + i] = C(0.0);
+					continue;
+				}
 				FlowVector& F_n = F[threadIdx.y-1][threadIdx.x];
 				FlowVector U0 = Uint[j*cuda::pitch + i];
 				NUMERIC_TYPE& H = U.H[j*cuda::pitch + i];
@@ -689,6 +891,7 @@ Zstar_x(Zstar_x),
 Zstar_y(Zstar_y),
 manning(manning),
 negative_depth_volume(nullptr),
+cell_mask(nullptr),
 sparse_faces(nullptr),
 sparse_fluxes(nullptr),
 sparse_face_count(0),
@@ -711,13 +914,13 @@ void lis::cuda::fv1::Solver::zero_ghost_cells()
 void lis::cuda::fv1::Solver::update_ghost_cells(cudaStream_t stream)
 {
 	lis::cuda::fv1::update_ghost_cells<<<64, CUDA_BLOCK_SIZE, 0, stream>>>(
-			Uold, Zstar_x, Zstar_y);
+			Uold, Zstar_x, Zstar_y, cell_mask);
 }
 
 void lis::cuda::fv1::Solver::clamp_negative_depths(cudaStream_t stream)
 {
 	clamp_negative_depths_kernel<<<grid_size, cuda::block_size, 0, stream>>>(
-			Uold, negative_depth_volume);
+			Uold, negative_depth_volume, cell_mask);
 }
 
 void lis::cuda::fv1::Solver::set_sparse_faces(const SparseFace* faces, int count)
@@ -733,6 +936,14 @@ void lis::cuda::fv1::Solver::set_sparse_faces(const SparseFace* faces, int count
 	}
 }
 
+void lis::cuda::fv1::Solver::set_cell_mask(const int* mask)
+{
+	cell_mask = mask;
+	if (cell_mask == nullptr) return;
+	apply_mask_to_zstar_x<<<grid_size, cuda::block_size>>>(DEM, Zstar_x, cell_mask);
+	apply_mask_to_zstar_y<<<grid_size, cuda::block_size>>>(DEM, Zstar_y, cell_mask);
+}
+
 lis::cuda::fv1::Flow& lis::cuda::fv1::Solver::update_flow_variables
 (
 	MassStats* mass_stats,
@@ -741,7 +952,7 @@ lis::cuda::fv1::Flow& lis::cuda::fv1::Solver::update_flow_variables
 {
 	if (friction)
 	{
-		apply_friction<<<grid_size, cuda::block_size, 0, stream>>>(Uold, manning);
+		apply_friction<<<grid_size, cuda::block_size, 0, stream>>>(Uold, manning, cell_mask);
 		update_ghost_cells(stream);
 	}
 
@@ -753,9 +964,9 @@ lis::cuda::fv1::Flow& lis::cuda::fv1::Solver::update_flow_variables
 	}
 
 	update_flow_variables_x<<<grid_size, cuda::block_size, 0, stream>>>
-			(Uold, Ux, DEM, Zstar_x, mass_stats, negative_depth_volume);
+			(Uold, Ux, DEM, Zstar_x, mass_stats, negative_depth_volume, cell_mask);
 	update_flow_variables_y<<<grid_size, cuda::block_size, 0, stream>>>
-			(Uold, Ux, U, DEM, Zstar_y, mass_stats, negative_depth_volume);
+			(Uold, Ux, U, DEM, Zstar_y, mass_stats, negative_depth_volume, cell_mask);
 
 	if (sparse_face_count > 0 && sparse_faces != nullptr)
 	{
@@ -778,7 +989,7 @@ void lis::cuda::fv1::Solver::update_dt_per_element
 ) const
 {
 	lis::cuda::fv1::update_dt_per_element<<<grid_size, cuda::block_size>>>(
-			dt_field, Uold);
+			dt_field, Uold, cell_mask);
 }
 
 void lis::cuda::fv1::Solver::swap_state()
@@ -811,7 +1022,7 @@ void lis::cuda::fv1::Solver::update_uniform_rain
 )
 {
 	update_uniform_rain_func<<<grid_size, cuda::block_size, 0, stream>>>(
-		Uold, DEM, rain_rate);
+		Uold, DEM, rain_rate, cell_mask);
 }
 
 lis::cuda::fv1::Solver::~Solver()

@@ -6,13 +6,15 @@ namespace fv1
 	void initialise_Zstar
 	(
 		Pars *Parptr,
-		Arrays *Arrptr
+		Arrays *Arrptr,
+		const int *cell_mask = nullptr
 	);
 
 	void update_Hstar
 	(
 		Pars *Parptr,
-		Arrays *Arrptr
+		Arrays *Arrptr,
+		const int *cell_mask = nullptr
 	);
 
 	NUMERIC_TYPE HUstar_neg_x

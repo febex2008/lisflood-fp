@@ -71,6 +71,7 @@ public:
 	void clamp_negative_depths(cudaStream_t stream);
 
 	void set_sparse_faces(const SparseFace* faces, int count);
+	void set_cell_mask(const int* mask);
 	
 	void update_uniform_rain(NUMERIC_TYPE rain_rate) { update_uniform_rain(rain_rate, 0); }
 	void update_uniform_rain(NUMERIC_TYPE rain_rate, cudaStream_t stream);
@@ -114,6 +115,7 @@ private:
 	NUMERIC_TYPE* Zstar_y;
 	NUMERIC_TYPE* manning;
 	NUMERIC_TYPE* negative_depth_volume;
+	const int* cell_mask;
 	const SparseFace* sparse_faces;
 	SparseFaceFlux* sparse_fluxes;
 	int sparse_face_count;
