@@ -69,50 +69,6 @@ __device__ inline bool active_cell(const int* cell_mask, int i, int j)
 	return cell_mask[k] != 0;
 }
 
-__global__ void apply_mask_to_zstar_x
-(
-	NUMERIC_TYPE* DEM,
-	NUMERIC_TYPE* Zstar_x,
-	const int* cell_mask
-)
-{
-	int global_i = blockIdx.x*blockDim.x + threadIdx.x;
-	int global_j = blockIdx.y*blockDim.y + threadIdx.y;
-	for (int j=global_j+1; j<=cuda::geometry.ysz; j+=blockDim.y*gridDim.y)
-	{
-		for (int i=global_i+1; i<cuda::geometry.xsz; i+=blockDim.x*gridDim.x)
-		{
-			const bool neg_active = active_cell(cell_mask, i, j);
-			const bool pos_active = active_cell(cell_mask, i+1, j);
-			if (neg_active == pos_active) continue;
-			const int g = j*cuda::pitch + i;
-			Zstar_x[g] = neg_active ? DEM[g] : DEM[g+1];
-		}
-	}
-}
-
-__global__ void apply_mask_to_zstar_y
-(
-	NUMERIC_TYPE* DEM,
-	NUMERIC_TYPE* Zstar_y,
-	const int* cell_mask
-)
-{
-	int global_i = blockIdx.x*blockDim.x + threadIdx.x;
-	int global_j = blockIdx.y*blockDim.y + threadIdx.y;
-	for (int j=global_j+1; j<cuda::geometry.ysz; j+=blockDim.y*gridDim.y)
-	{
-		for (int i=global_i+1; i<=cuda::geometry.xsz; i+=blockDim.x*gridDim.x)
-		{
-			const bool pos_active = active_cell(cell_mask, i, j);
-			const bool neg_active = active_cell(cell_mask, i, j+1);
-			if (neg_active == pos_active) continue;
-			const int g = j*cuda::pitch + i;
-			Zstar_y[g] = neg_active ? DEM[g+cuda::pitch] : DEM[g];
-		}
-	}
-}
-
 __global__ void clamp_negative_depths_kernel
 (
 	Flow U,
@@ -939,9 +895,6 @@ void lis::cuda::fv1::Solver::set_sparse_faces(const SparseFace* faces, int count
 void lis::cuda::fv1::Solver::set_cell_mask(const int* mask)
 {
 	cell_mask = mask;
-	if (cell_mask == nullptr) return;
-	apply_mask_to_zstar_x<<<grid_size, cuda::block_size>>>(DEM, Zstar_x, cell_mask);
-	apply_mask_to_zstar_y<<<grid_size, cuda::block_size>>>(DEM, Zstar_y, cell_mask);
 }
 
 lis::cuda::fv1::Flow& lis::cuda::fv1::Solver::update_flow_variables
