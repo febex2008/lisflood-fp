@@ -13,6 +13,34 @@ namespace cuda
 namespace fv1
 {
 
+enum SparseFaceType
+{
+	SPARSE_FACE_TRANSMISSIVE_OUTFLOW = 1,
+	SPARSE_FACE_FIXED_FLUX = 2,
+	SPARSE_FACE_WEIR = 3
+};
+
+struct SparseFace
+{
+	int neg_g;
+	int pos_g;
+	int face_g;
+	int neg_cell;
+	int pos_cell;
+	int axis; /* 0=x: west->east, 1=y: south->north */
+	int type;
+	NUMERIC_TYPE p0;
+	NUMERIC_TYPE p1;
+	NUMERIC_TYPE p2;
+	NUMERIC_TYPE p3;
+};
+
+struct SparseFaceFlux
+{
+	FlowVector base;
+	FlowVector desired;
+};
+
 class Solver : public cuda::Solver<Flow>
 {
 public:
@@ -35,6 +63,11 @@ public:
 
 	void update_ghost_cells() { update_ghost_cells(0); }
 	void update_ghost_cells(cudaStream_t stream);
+
+	void clamp_negative_depths() { clamp_negative_depths(0); }
+	void clamp_negative_depths(cudaStream_t stream);
+
+	void set_sparse_faces(const SparseFace* faces, int count);
 	
 	void update_uniform_rain(NUMERIC_TYPE rain_rate) { update_uniform_rain(rain_rate, 0); }
 	void update_uniform_rain(NUMERIC_TYPE rain_rate, cudaStream_t stream);
@@ -78,6 +111,10 @@ private:
 	NUMERIC_TYPE* Zstar_y;
 	NUMERIC_TYPE* manning;
 	NUMERIC_TYPE* negative_depth_volume;
+	const SparseFace* sparse_faces;
+	SparseFaceFlux* sparse_fluxes;
+	int sparse_face_count;
+	int sparse_flux_capacity;
 	bool friction;
 	const dim3 grid_size;
 };
