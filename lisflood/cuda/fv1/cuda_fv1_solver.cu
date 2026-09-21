@@ -147,7 +147,10 @@ __global__ void prepare_sparse_face_fluxes
 			const bool pos_inside = face.pos_cell >= 0;
 			if (neg_inside != pos_inside)
 			{
-				FlowVector U_inside = neg_inside ? Ustar_neg : Ustar_pos;
+				const bool internal_domain = face.p3 > C(0.5);
+				FlowVector U_inside = internal_domain
+					? (neg_inside ? U_neg : U_pos)
+					: (neg_inside ? Ustar_neg : Ustar_pos);
 				FlowVector U_outside = U_inside;
 				if (face.type == SPARSE_FACE_CLOSED)
 				{
