@@ -38,7 +38,8 @@ struct SparseFace
 struct SparseFaceFlux
 {
 	FlowVector base;
-	FlowVector desired;
+	FlowVector desired_neg;
+	FlowVector desired_pos;
 };
 
 class Solver : public cuda::Solver<Flow>
