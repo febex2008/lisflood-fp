@@ -104,6 +104,18 @@ __device__ inline FlowVector sparse_hll
 	return axis == 0 ? HLL::x(U_neg, U_pos) : HLL::y(U_neg, U_pos);
 }
 
+__device__ inline NUMERIC_TYPE weir_blocked_pressure
+(
+	NUMERIC_TYPE H,
+	NUMERIC_TYPE Z,
+	NUMERIC_TYPE crest
+)
+{
+	if (H <= C(0.0)) return C(0.0);
+	const NUMERIC_TYPE blocked = FMIN(H, FMAX(C(0.0), crest - Z));
+	return cuda::physical_params.g * (H * blocked - C(0.5) * blocked * blocked);
+}
+
 __global__ void prepare_sparse_face_fluxes
 (
 	Flow Uold,
@@ -125,7 +137,8 @@ __global__ void prepare_sparse_face_fluxes
 		const FlowVector Ustar_pos = U_pos.star(DEM[face.pos_g], Zstar);
 		SparseFaceFlux result;
 		result.base = sparse_hll(face.axis, Ustar_neg, Ustar_pos);
-		result.desired = result.base;
+		result.desired_neg = result.base;
+		result.desired_pos = result.base;
 
 		if (face.type == SPARSE_FACE_TRANSMISSIVE_OUTFLOW)
 		{
@@ -142,19 +155,25 @@ __global__ void prepare_sparse_face_fluxes
 					if (face.axis == 0) U_outside.HU = -U_outside.HU;
 					else U_outside.HV = -U_outside.HV;
 				}
-				result.desired = neg_inside
+				const FlowVector desired = neg_inside
 					? sparse_hll(face.axis, U_inside, U_outside)
 					: sparse_hll(face.axis, U_outside, U_inside);
+				result.desired_neg = desired;
+				result.desired_pos = desired;
 			}
 		}
 		else if (face.type == SPARSE_FACE_FIXED_FLUX)
 		{
-			result.desired = { face.p0, face.p1, face.p2 };
+			const FlowVector desired = { face.p0, face.p1, face.p2 };
+			result.desired_neg = desired;
+			result.desired_pos = desired;
 		}
 		else if (face.type == SPARSE_FACE_WEIR && face.neg_cell >= 0 && face.pos_cell >= 0)
 		{
-			const NUMERIC_TYPE eta_neg = DEM[face.neg_g] + U_neg.H;
-			const NUMERIC_TYPE eta_pos = DEM[face.pos_g] + U_pos.H;
+			const NUMERIC_TYPE Z_neg = DEM[face.neg_g];
+			const NUMERIC_TYPE Z_pos = DEM[face.pos_g];
+			const NUMERIC_TYPE eta_neg = Z_neg + U_neg.H;
+			const NUMERIC_TYPE eta_pos = Z_pos + U_pos.H;
 			const bool neg_upstream = eta_neg >= eta_pos;
 			const NUMERIC_TYPE eta_up = neg_upstream ? eta_neg : eta_pos;
 			const NUMERIC_TYPE eta_down = neg_upstream ? eta_pos : eta_neg;
@@ -162,11 +181,12 @@ __global__ void prepare_sparse_face_fluxes
 			const NUMERIC_TYPE crest = face.p0;
 			const NUMERIC_TYPE cw = FMAX(C(0.0), face.p1);
 			const NUMERIC_TYPE exponent = face.p2 > C(0.0) ? face.p2 : C(0.385);
-			const NUMERIC_TYPE width_fraction = face.p3 > C(0.0) ? face.p3 : C(1.0);
+			const NUMERIC_TYPE width_fraction = FMIN(C(1.0), FMAX(C(0.0), face.p3));
+			const NUMERIC_TYPE open_fraction = C(1.0) - width_fraction;
 			const NUMERIC_TYPE h_up = FMAX(C(0.0), eta_up - crest);
 			const NUMERIC_TYPE h_down = FMAX(C(0.0), eta_down - crest);
-			NUMERIC_TYPE q = C(0.0);
-			if (h_up > cuda::solver_params.DepthThresh && cw > C(0.0))
+			NUMERIC_TYPE q_weir = C(0.0);
+			if (width_fraction > C(0.0) && h_up > cuda::solver_params.DepthThresh && cw > C(0.0))
 			{
 				NUMERIC_TYPE qmag = width_fraction * cw * POW(h_up, C(1.5));
 				if (h_down > C(0.0))
@@ -175,23 +195,40 @@ __global__ void prepare_sparse_face_fluxes
 					const NUMERIC_TYPE sub = FMAX(C(0.0), C(1.0) - POW(ratio, C(1.5)));
 					qmag *= POW(sub, exponent);
 				}
-				q = neg_upstream ? qmag : -qmag;
+				q_weir = neg_upstream ? qmag : -qmag;
 			}
-			const NUMERIC_TYPE h_flow = FMAX(h_up, cuda::solver_params.DepthThresh);
-			const NUMERIC_TYPE normal_velocity = q / h_flow;
+
 			NUMERIC_TYPE tangential_velocity = C(0.0);
 			if (U_up.H > cuda::solver_params.DepthThresh)
 				tangential_velocity = face.axis == 0 ? U_up.HV / U_up.H : U_up.HU / U_up.H;
-			result.desired.H = q;
+			const NUMERIC_TYPE active_h = FMAX(h_up, cuda::solver_params.DepthThresh);
+			const NUMERIC_TYPE normal_advective = width_fraction > C(0.0)
+				? q_weir * q_weir / (width_fraction * active_h) : C(0.0);
+			const NUMERIC_TYPE wall_neg = width_fraction * weir_blocked_pressure(U_neg.H, Z_neg, crest);
+			const NUMERIC_TYPE wall_pos = width_fraction * weir_blocked_pressure(U_pos.H, Z_pos, crest);
+			const NUMERIC_TYPE mass_flux = open_fraction * result.base.H + q_weir;
+			const NUMERIC_TYPE tangential_flux = open_fraction *
+				(face.axis == 0 ? result.base.HV : result.base.HU) + q_weir * tangential_velocity;
+			const NUMERIC_TYPE normal_neg = open_fraction *
+				(face.axis == 0 ? result.base.HU : result.base.HV) + wall_neg + normal_advective;
+			const NUMERIC_TYPE normal_pos = open_fraction *
+				(face.axis == 0 ? result.base.HU : result.base.HV) + wall_pos + normal_advective;
+
+			result.desired_neg.H = mass_flux;
+			result.desired_pos.H = mass_flux;
 			if (face.axis == 0)
 			{
-				result.desired.HU = q * normal_velocity;
-				result.desired.HV = q * tangential_velocity;
+				result.desired_neg.HU = normal_neg;
+				result.desired_pos.HU = normal_pos;
+				result.desired_neg.HV = tangential_flux;
+				result.desired_pos.HV = tangential_flux;
 			}
 			else
 			{
-				result.desired.HU = q * tangential_velocity;
-				result.desired.HV = q * normal_velocity;
+				result.desired_neg.HU = tangential_flux;
+				result.desired_pos.HU = tangential_flux;
+				result.desired_neg.HV = normal_neg;
+				result.desired_pos.HV = normal_pos;
 			}
 		}
 		fluxes[n] = result;
@@ -211,16 +248,17 @@ __global__ void apply_sparse_face_fluxes
 	{
 		const SparseFace face = faces[n];
 		const SparseFaceFlux pair = fluxes[n];
-		const FlowVector dF = pair.desired - pair.base;
 		const NUMERIC_TYPE scale = cuda::dt / (face.axis == 0 ? cuda::geometry.dx : cuda::geometry.dy);
 		if (face.neg_cell >= 0)
 		{
+			const FlowVector dF = pair.desired_neg - pair.base;
 			atomicAdd(&U.H[face.neg_g], -scale * dF.H);
 			atomicAdd(&U.HU[face.neg_g], -scale * dF.HU);
 			atomicAdd(&U.HV[face.neg_g], -scale * dF.HV);
 		}
 		if (face.pos_cell >= 0)
 		{
+			const FlowVector dF = pair.desired_pos - pair.base;
 			atomicAdd(&U.H[face.pos_g], scale * dF.H);
 			atomicAdd(&U.HU[face.pos_g], scale * dF.HU);
 			atomicAdd(&U.HV[face.pos_g], scale * dF.HV);
@@ -232,7 +270,8 @@ __global__ void apply_sparse_face_fluxes
 			const NUMERIC_TYPE outward_sign = neg_inside ? C(1.0) : C(-1.0);
 			const NUMERIC_TYPE edge_length = face.axis == 0 ? cuda::geometry.dy : cuda::geometry.dx;
 			const NUMERIC_TYPE base_outward = outward_sign * pair.base.H * edge_length;
-			const NUMERIC_TYPE desired_outward = outward_sign * pair.desired.H * edge_length;
+			const NUMERIC_TYPE desired_mass = neg_inside ? pair.desired_neg.H : pair.desired_pos.H;
+			const NUMERIC_TYPE desired_outward = outward_sign * desired_mass * edge_length;
 			const NUMERIC_TYPE base_out = FMAX(C(0.0), base_outward);
 			const NUMERIC_TYPE base_in = FMAX(C(0.0), -base_outward);
 			const NUMERIC_TYPE desired_out = FMAX(C(0.0), desired_outward);
