@@ -1,0 +1,190 @@
+name: Patch oriented weir feature branch
+
+on:
+  push:
+    branches: [dev-weir-angle-head]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev-weir-angle-head
+          fetch-depth: 0
+
+      - name: Patch CUDA sparse-weir physics
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('lisflood/cuda/fv1/cuda_fv1_solver.cu')
+          text = path.read_text()
+          marker = '\t\telse if (face.type == SPARSE_FACE_WEIR && face.neg_cell >= 0 && face.pos_cell >= 0)'
+          start = text.find(marker)
+          if start < 0:
+              raise SystemExit('CUDA weir block start not found')
+          brace = text.find('{', start)
+          depth = 0
+          end = None
+          for i in range(brace, len(text)):
+              if text[i] == '{':
+                  depth += 1
+              elif text[i] == '}':
+                  depth -= 1
+                  if depth == 0:
+                      end = i + 1
+                      break
+          if end is None:
+              raise SystemExit('CUDA weir block end not found')
+
+          replacement = r'''\t\telse if (face.type == SPARSE_FACE_WEIR && face.neg_cell >= 0 && face.pos_cell >= 0)
+\t\t{
+\t\t\tconst NUMERIC_TYPE Z_neg = DEM[face.neg_g];
+\t\t\tconst NUMERIC_TYPE Z_pos = DEM[face.pos_g];
+\t\t\tconst NUMERIC_TYPE eta_neg = Z_neg + U_neg.H;
+\t\t\tconst NUMERIC_TYPE eta_pos = Z_pos + U_pos.H;
+\t\t\tconst NUMERIC_TYPE crest = face.p0;
+\t\t\tconst NUMERIC_TYPE cw = FMAX(C(0.0), face.p1);
+
+\t\t\t// Legacy FACE_WEIR stores (submergence exponent, width fraction)
+\t\t\t// in p2/p3. Oriented GIS weirs use p3<0 and encode
+\t\t\t// (normal_x, normal_y-2) without changing the sparse-face ABI.
+\t\t\tconst bool oriented = face.p3 < C(0.0);
+\t\t\tconst NUMERIC_TYPE exponent = oriented ? C(0.385)
+\t\t\t\t: (face.p2 > C(0.0) ? face.p2 : C(0.385));
+\t\t\tconst NUMERIC_TYPE barrier_fraction = oriented ? C(1.0)
+\t\t\t\t: FMIN(C(1.0), FMAX(C(0.0), face.p3));
+\t\t\tconst NUMERIC_TYPE open_fraction = C(1.0) - barrier_fraction;
+
+\t\t\tNUMERIC_TYPE nx = oriented ? face.p2
+\t\t\t\t: (face.axis == 0 ? C(1.0) : C(0.0));
+\t\t\tNUMERIC_TYPE ny = oriented ? face.p3 + C(2.0)
+\t\t\t\t: (face.axis == 1 ? C(1.0) : C(0.0));
+\t\t\tconst NUMERIC_TYPE nlen = SQRT(nx*nx + ny*ny);
+\t\t\tif (nlen > C(0.0))
+\t\t\t{
+\t\t\t\tnx /= nlen;
+\t\t\t\tny /= nlen;
+\t\t\t}
+\t\t\telse
+\t\t\t{
+\t\t\t\tnx = face.axis == 0 ? C(1.0) : C(0.0);
+\t\t\t\tny = face.axis == 1 ? C(1.0) : C(0.0);
+\t\t\t}
+\t\t\tconst NUMERIC_TYPE edge_weight = oriented
+\t\t\t\t? FMIN(C(1.0), FMAX(C(0.0), FABS(face.axis == 0 ? nx : ny)))
+\t\t\t\t: barrier_fraction;
+
+\t\t\tNUMERIC_TYPE un = C(0.0), up = C(0.0), vn = C(0.0), vp = C(0.0);
+\t\t\tif (U_neg.H > cuda::solver_params.DepthThresh)
+\t\t\t{
+\t\t\t\tun = U_neg.HU / U_neg.H;
+\t\t\t\tvn = U_neg.HV / U_neg.H;
+\t\t\t}
+\t\t\tif (U_pos.H > cuda::solver_params.DepthThresh)
+\t\t\t{
+\t\t\t\tup = U_pos.HU / U_pos.H;
+\t\t\t\tvp = U_pos.HV / U_pos.H;
+\t\t\t}
+\t\t\tconst NUMERIC_TYPE unorm_neg = un*nx + vn*ny;
+\t\t\tconst NUMERIC_TYPE unorm_pos = up*nx + vp*ny;
+\t\t\tconst NUMERIC_TYPE head_neg = eta_neg + C(0.5)*unorm_neg*unorm_neg/cuda::physical_params.g;
+\t\t\tconst NUMERIC_TYPE head_pos = eta_pos + C(0.5)*unorm_pos*unorm_pos/cuda::physical_params.g;
+\t\t\tconst bool neg_upstream = head_neg >= head_pos;
+\t\t\tconst NUMERIC_TYPE head_up = neg_upstream ? head_neg : head_pos;
+\t\t\tconst NUMERIC_TYPE head_down = neg_upstream ? head_pos : head_neg;
+\t\t\tconst NUMERIC_TYPE eta_up = neg_upstream ? eta_neg : eta_pos;
+\t\t\tconst NUMERIC_TYPE eta_down = neg_upstream ? eta_pos : eta_neg;
+\t\t\tconst NUMERIC_TYPE u_up = neg_upstream ? un : up;
+\t\t\tconst NUMERIC_TYPE v_up = neg_upstream ? vn : vp;
+\t\t\tconst NUMERIC_TYPE h_up = FMAX(C(0.0), head_up - crest);
+\t\t\tconst NUMERIC_TYPE h_down = FMAX(C(0.0), head_down - crest);
+
+\t\t\tNUMERIC_TYPE q_phys = C(0.0);
+\t\t\tif (edge_weight > C(0.0) && h_up > cuda::solver_params.DepthThresh && cw > C(0.0))
+\t\t\t{
+\t\t\t\tNUMERIC_TYPE qmag = cw * POW(h_up, C(1.5));
+\t\t\t\tif (h_down > C(0.0))
+\t\t\t\t{
+\t\t\t\t\tconst NUMERIC_TYPE ratio = FMIN(C(1.0), h_down / h_up);
+\t\t\t\t\tconst NUMERIC_TYPE sub = FMAX(C(0.0), C(1.0) - POW(ratio, C(1.5)));
+\t\t\t\t\tqmag *= POW(sub, exponent);
+\t\t\t\t}
+\t\t\t\tq_phys = neg_upstream ? qmag : -qmag;
+\t\t\t}
+
+\t\t\tconst NUMERIC_TYPE mass_weir = edge_weight * q_phys;
+\t\t\tconst NUMERIC_TYPE tx = -ny;
+\t\t\tconst NUMERIC_TYPE ty = nx;
+\t\t\tconst NUMERIC_TYPE ut = u_up*tx + v_up*ty;
+\t\t\tconst NUMERIC_TYPE adv_h = FMAX(h_up, cuda::solver_params.DepthThresh);
+\t\t\tconst NUMERIC_TYPE normal_advective = q_phys*q_phys / adv_h;
+\t\t\tconst NUMERIC_TYPE hydro_h = FMAX(C(0.0), eta_up - FMAX(eta_down, crest));
+\t\t\tconst NUMERIC_TYPE normal_hydro = C(0.5) * cuda::physical_params.g * hydro_h * hydro_h;
+\t\t\tconst NUMERIC_TYPE flow_sign = neg_upstream ? C(1.0) : C(-1.0);
+\t\t\tconst NUMERIC_TYPE normal_momentum = flow_sign * (normal_advective + normal_hydro);
+\t\t\tconst NUMERIC_TYPE through_hu = edge_weight * (normal_momentum*nx + q_phys*ut*tx);
+\t\t\tconst NUMERIC_TYPE through_hv = edge_weight * (normal_momentum*ny + q_phys*ut*ty);
+
+\t\t\t// The blocked water column is a wall force. In oriented mode the
+\t\t\t// staircase geometry itself supplies the x/y force projection.
+\t\t\tconst NUMERIC_TYPE wall_scale = oriented ? C(1.0) : barrier_fraction;
+\t\t\tconst NUMERIC_TYPE wall_neg = wall_scale * weir_blocked_pressure(U_neg.H, Z_neg, crest);
+\t\t\tconst NUMERIC_TYPE wall_pos = wall_scale * weir_blocked_pressure(U_pos.H, Z_pos, crest);
+\t\t\tFlowVector weir_neg = {
+\t\t\t\topen_fraction * result.base.H + mass_weir,
+\t\t\t\topen_fraction * result.base.HU + through_hu,
+\t\t\t\topen_fraction * result.base.HV + through_hv
+\t\t\t};
+\t\t\tFlowVector weir_pos = weir_neg;
+\t\t\tif (face.axis == 0)
+\t\t\t{
+\t\t\t\tweir_neg.HU += wall_neg;
+\t\t\t\tweir_pos.HU += wall_pos;
+\t\t\t}
+\t\t\telse
+\t\t\t{
+\t\t\t\tweir_neg.HV += wall_neg;
+\t\t\t\tweir_pos.HV += wall_pos;
+\t\t\t}
+
+\t\t\t// Once strongly submerged, the crest is no longer the controlling
+\t\t\t// section. Smoothly recover the normal HLL mass and momentum flux.
+\t\t\tNUMERIC_TYPE hll_blend = C(0.0);
+\t\t\tif (h_up > cuda::solver_params.DepthThresh)
+\t\t\t{
+\t\t\t\tconst NUMERIC_TYPE ratio = FMIN(C(1.0), h_down / h_up);
+\t\t\t\tconst NUMERIC_TYPE x = FMIN(C(1.0), FMAX(C(0.0), (ratio - C(0.80)) / C(0.15)));
+\t\t\t\thll_blend = x*x*(C(3.0) - C(2.0)*x);
+\t\t\t}
+\t\t\tconst NUMERIC_TYPE weir_blend = C(1.0) - hll_blend;
+\t\t\tresult.desired_neg.H = weir_blend*weir_neg.H + hll_blend*result.base.H;
+\t\t\tresult.desired_neg.HU = weir_blend*weir_neg.HU + hll_blend*result.base.HU;
+\t\t\tresult.desired_neg.HV = weir_blend*weir_neg.HV + hll_blend*result.base.HV;
+\t\t\tresult.desired_pos.H = weir_blend*weir_pos.H + hll_blend*result.base.H;
+\t\t\tresult.desired_pos.HU = weir_blend*weir_pos.HU + hll_blend*result.base.HU;
+\t\t\tresult.desired_pos.HV = weir_blend*weir_pos.HV + hll_blend*result.base.HV;
+\t\t}'''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+
+      - name: Check patch
+        run: |
+          git diff --check
+          grep -q "const bool oriented = face.p3 < C(0.0);" lisflood/cuda/fv1/cuda_fv1_solver.cu
+          grep -q "hll_blend = x\*x" lisflood/cuda/fv1/cuda_fv1_solver.cu
+
+      - name: Commit feature implementation
+        shell: bash
+        run: |
+          rm .github/workflows/patch-oriented-weir.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add lisflood/cuda/fv1/cuda_fv1_solver.cu .github/workflows/patch-oriented-weir.yml
+          git commit -m "Implement oriented weir head and momentum on CUDA [skip ci]"
+          git push origin HEAD:dev-weir-angle-head
