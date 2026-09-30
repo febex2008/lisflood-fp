@@ -1,6 +1,7 @@
 #pragma once
 #include "../geometry.h"
 #include "cuda_flow.cuh"
+#include "cuda_activity.cuh"
 
 namespace lis
 {
@@ -25,7 +26,11 @@ struct Flow
 		int idx
 	)
 	{
-		return { H[idx], HU[idx], HV[idx] };
+		#ifdef __CUDA_ARCH__
+                return { H[idx], HU[idx], HV[idx], cell_storage_depth(idx) };
+#else
+                return { H[idx], HU[idx], HV[idx] };
+#endif
 	}
 
 	static void allocate_pinned

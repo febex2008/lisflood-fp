@@ -1,4 +1,6 @@
 #include "ghostraster.h"
+#include "cuda_activity.cuh"
+#include "../swe/wet_dry.h"
 #include "cuda_geometry.cuh"
 #include "cuda_util.cuh"
 #include <helper_cuda.h>
@@ -28,7 +30,7 @@ __global__ void update_dt_block_min
 		{
 			const int k = (j + 1) * cuda::pitch + (i + 1);
 			const NUMERIC_TYPE H = U.H[k];
-			if (H > cuda::solver_params.DepthThresh)
+			if (momentum_wet(H, U.HU[k], U.HV[k], cuda::solver_params.DepthThresh, cell_storage_depth(k)))
 			{
 				const NUMERIC_TYPE inv_H = C(1.0) / H;
 				const NUMERIC_TYPE u = U.HU[k] * inv_H;
@@ -76,7 +78,7 @@ __global__ void update_dt_block_min_diag
 		{
 			const int k = (j + 1) * cuda::pitch + (i + 1);
 			const NUMERIC_TYPE H = U.H[k];
-			if (H > cuda::solver_params.DepthThresh)
+			if (momentum_wet(H, U.HU[k], U.HV[k], cuda::solver_params.DepthThresh, cell_storage_depth(k)))
 			{
 				const NUMERIC_TYPE inv_H = C(1.0) / H;
 				const NUMERIC_TYPE u = U.HU[k] * inv_H;
@@ -195,7 +197,7 @@ __global__ void record_cfl_diagnostic
 	rec.H = U.H[k];
 	rec.HU = U.HU[k];
 	rec.HV = U.HV[k];
-	if (rec.H > cuda::solver_params.DepthThresh)
+	if (momentum_wet(rec.H, rec.HU, rec.HV, cuda::solver_params.DepthThresh, cell_storage_depth(k)))
 	{
 		const NUMERIC_TYPE inv_H = C(1.0) / rec.H;
 		const NUMERIC_TYPE u = rec.HU * inv_H;

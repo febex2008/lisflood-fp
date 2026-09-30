@@ -1,4 +1,5 @@
 #include "fv1.h"
+#include "wet_dry.h"
 #include "fv1/modifiedvars.h"
 #include "boundary.h"
 #include "hll.h"
@@ -122,7 +123,7 @@ void fv1::apply_friction
 			NUMERIC_TYPE& HU = Arrptr->HU[j*Parptr->xsz + i];
 			NUMERIC_TYPE& HV = Arrptr->HV[j*Parptr->xsz + i];
 
-			if (H <= Solverptr->DepthThresh) {
+			if (!surface_momentum_wet(Solverptr,k,H,HU,HV)) {
 				HU = C(0.0);
 				HV = C(0.0);
 				continue;
@@ -133,16 +134,23 @@ void fv1::apply_friction
 			if (FABS(U) <= Solverptr->SpeedThresh
 					&& FABS(V) <= Solverptr->SpeedThresh)
 			{
-				HU = C(0.0);
-				HV = C(0.0);
+				// Avoid division by zero without erasing stored momentum.
 				continue;
 			}
 
             NUMERIC_TYPE n = (Arrptr->Manningsn == nullptr)
                 ? Parptr->FPn : Arrptr->Manningsn[j*Parptr->xsz + i];
 
-			NUMERIC_TYPE Cf = Solverptr->g*n*n / pow(H, C(1.0)/C(3.0));
-			NUMERIC_TYPE speed = SQRT(U*U+V*V);
+// The activity guard above ensures H is positive.
+                    NUMERIC_TYPE Cf = Solverptr->g*n*n / pow(H, C(1.0)/C(3.0));
+                        NUMERIC_TYPE speed = SQRT(U*U+V*V);
+                        if (Solverptr->manning_scheme == 1) {
+                            // Freeze the drag coefficient and damp both components equally.
+                            const NUMERIC_TYPE damping = C(1.0) / (C(1.0) + Solverptr->Tstep*Cf*speed/H);
+                            HU *= damping;
+                            HV *= damping;
+                            continue;
+                        }
 
 			NUMERIC_TYPE Sf_x = -Cf*U*speed;
 			NUMERIC_TYPE Sf_y = -Cf*V*speed;
@@ -284,7 +292,7 @@ void fv1::update_fluxes
 			NUMERIC_TYPE HV_pos = HVstar_pos_x(Parptr, Solverptr, Arrptr, i, j);
 
 			HLL_x(Solverptr, H_neg, HU_neg, HV_neg, H_pos, HU_pos, HV_pos,
-				FHx, FHUx, FHVx);
+				FHx, FHUx, FHVx, surface_storage_depth(Solverptr,neg_k), surface_storage_depth(Solverptr,pos_k));
 		}
 	}
 
@@ -314,7 +322,7 @@ void fv1::update_fluxes
 					Parptr, Solverptr, Arrptr, i, j-1);
 
 			HLL_y(Solverptr, H_neg, HU_neg, HV_neg, H_pos, HU_pos, HV_pos,
-					FHy, FHUy, FHVy);
+					FHy, FHUy, FHVy, surface_storage_depth(Solverptr,neg_k), surface_storage_depth(Solverptr,pos_k));
 		}
 	}
 }
@@ -360,7 +368,7 @@ void fv1::update_fluxes_on_boundaries
 				H_outside, HU_outside, HV_outside);
 
 		HLL_x(Solverptr, H_outside, HU_outside, HV_outside,
-				H_inside, HU_inside, HV_inside, FHx, FHUx, FHVx);
+				H_inside, HU_inside, HV_inside, FHx, FHUx, FHVx, surface_storage_depth(Solverptr,(std::min)(j,Parptr->ysz-1)*Parptr->xsz+(std::min)(i,Parptr->xsz-1)), surface_storage_depth(Solverptr,(std::min)(j,Parptr->ysz-1)*Parptr->xsz+(std::min)(i,Parptr->xsz-1)));
 	}
 
 	// east
@@ -397,7 +405,7 @@ void fv1::update_fluxes_on_boundaries
 				H_outside, HU_outside, HV_outside);
 
 		HLL_x(Solverptr, H_inside, HU_inside, HV_inside,
-				H_outside, HU_outside, HV_outside, FHx, FHUx, FHVx);
+				H_outside, HU_outside, HV_outside, FHx, FHUx, FHVx, surface_storage_depth(Solverptr,(std::min)(j,Parptr->ysz-1)*Parptr->xsz+(std::min)(i,Parptr->xsz-1)), surface_storage_depth(Solverptr,(std::min)(j,Parptr->ysz-1)*Parptr->xsz+(std::min)(i,Parptr->xsz-1)));
 	}
 	
 	// north
@@ -432,7 +440,7 @@ void fv1::update_fluxes_on_boundaries
 				H_outside, HV_outside, HU_outside);
 
 		HLL_y(Solverptr, H_inside, HU_inside, HV_inside,
-				H_outside, HU_outside, HV_outside, FHy, FHUy, FHVy);
+				H_outside, HU_outside, HV_outside, FHy, FHUy, FHVy, surface_storage_depth(Solverptr,(std::min)(j,Parptr->ysz-1)*Parptr->xsz+(std::min)(i,Parptr->xsz-1)), surface_storage_depth(Solverptr,(std::min)(j,Parptr->ysz-1)*Parptr->xsz+(std::min)(i,Parptr->xsz-1)));
 	}
 
 	// south
@@ -469,7 +477,7 @@ void fv1::update_fluxes_on_boundaries
 				H_outside, HV_outside, HU_outside);
 
 		HLL_y(Solverptr, H_outside, HU_outside, HV_outside,
-				H_inside, HU_inside, HV_inside, FHy, FHUy, FHVy);
+				H_inside, HU_inside, HV_inside, FHy, FHUy, FHVy, surface_storage_depth(Solverptr,(std::min)(j,Parptr->ysz-1)*Parptr->xsz+(std::min)(i,Parptr->xsz-1)), surface_storage_depth(Solverptr,(std::min)(j,Parptr->ysz-1)*Parptr->xsz+(std::min)(i,Parptr->xsz-1)));
 	}
 }
 
@@ -663,7 +671,7 @@ NUMERIC_TYPE fv1::Tstep_from_cfl
 			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
 			if (cell_mask != nullptr && cell_mask[k] == 0) continue;
 			NUMERIC_TYPE H = Arrptr->H[k];
-			if (H > Solverptr->DepthThresh)
+			if (surface_momentum_wet(Solverptr,k,H,Arrptr->HU[k],Arrptr->HV[k]))
 			{
 				NUMERIC_TYPE HU = Arrptr->HU[j*Parptr->xsz + i];
 				NUMERIC_TYPE HV = Arrptr->HV[j*Parptr->xsz + i];

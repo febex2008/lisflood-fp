@@ -1,5 +1,6 @@
 #include "cuda_flow.cuh"
 #include "cuda_solver.cuh"
+#include "../swe/wet_dry.h"
 
 __device__ lis::cuda::FlowVector lis::cuda::FlowVector::star
 (
@@ -9,13 +10,13 @@ __device__ lis::cuda::FlowVector lis::cuda::FlowVector::star
 {
 	NUMERIC_TYPE Hstar = calculate_Hstar(Z, Zstar);
 
-	return { Hstar, Hstar*speed(HU), Hstar*speed(HV) };
+	return { Hstar, Hstar*speed(HU), Hstar*speed(HV), storage_depth };
 };
 
 __device__
 lis::cuda::FlowVector lis::cuda::FlowVector::physical_flux_x() const
 {
-	if (H <= cuda::solver_params.DepthThresh)
+	if (!momentum_wet(H, HU, HV, cuda::solver_params.DepthThresh, storage_depth))
 	{
 		return FlowVector();
 	}
@@ -28,7 +29,7 @@ lis::cuda::FlowVector lis::cuda::FlowVector::physical_flux_x() const
 __device__
 lis::cuda::FlowVector lis::cuda::FlowVector::physical_flux_y() const
 {
-	if (H <= cuda::solver_params.DepthThresh)
+	if (!momentum_wet(H, HU, HV, cuda::solver_params.DepthThresh, storage_depth))
 	{
 		return FlowVector();
 	}
@@ -44,8 +45,8 @@ __device__ NUMERIC_TYPE lis::cuda::FlowVector::calculate_Hstar
 	NUMERIC_TYPE Zstar
 ) const
 {
-	NUMERIC_TYPE ETA = H + Z;
-	return FMAX(C(0.0), ETA - Zstar);
+	const NUMERIC_TYPE bed_step = Zstar - Z;
+	return FMAX(C(0.0), H - bed_step);
 }
 
 __device__ NUMERIC_TYPE lis::cuda::FlowVector::speed
@@ -53,7 +54,7 @@ __device__ NUMERIC_TYPE lis::cuda::FlowVector::speed
 	NUMERIC_TYPE discharge
 ) const
 {
-	if (H >= cuda::solver_params.DepthThresh)
+	if (momentum_wet(H, HU, HV, cuda::solver_params.DepthThresh, storage_depth))
 	{
 		return discharge/H;
 	}

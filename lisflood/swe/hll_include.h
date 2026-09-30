@@ -1,4 +1,6 @@
-if (H_neg <= DepthThresh && H_pos <= DepthThresh)
+const bool wet_neg = momentum_wet(H_neg, HU_neg, HV_neg, Solverptr->DepthThresh, storage_neg);
+const bool wet_pos = momentum_wet(H_pos, HU_pos, HV_pos, Solverptr->DepthThresh, storage_pos);
+if (!wet_neg && !wet_pos)
 {
 	H_flux = C(0.0);
 	HU_flux = C(0.0);
@@ -7,7 +9,7 @@ if (H_neg <= DepthThresh && H_pos <= DepthThresh)
 }
 
 NUMERIC_TYPE U_neg, V_neg;
-if (H_neg <= DepthThresh)
+if (!wet_neg)
 {
 	U_neg = C(0.0);
 	V_neg = C(0.0);
@@ -19,7 +21,7 @@ else
 }
 
 NUMERIC_TYPE U_pos, V_pos;
-if (H_pos <= DepthThresh)
+if (!wet_pos)
 {
 	U_pos = C(0.0);
 	V_pos = C(0.0);
@@ -39,7 +41,7 @@ NUMERIC_TYPE U_star = C(0.5)*(U_neg + U_pos) + A_neg - A_pos;
 NUMERIC_TYPE A_star = SQRT(g*H_star);
 
 NUMERIC_TYPE S_neg;
-if (H_neg <= DepthThresh)
+if (!wet_neg)
 {
 	S_neg = U_pos - C(2.0)*A_pos;
 }
@@ -49,7 +51,7 @@ else
 }
 
 NUMERIC_TYPE S_pos;
-if (H_pos <= DepthThresh)
+if (!wet_pos)
 {
 	S_pos = U_neg + C(2.0)*A_neg;
 }

@@ -1,4 +1,5 @@
 #include "modifiedvars.h"
+#include "../wet_dry.h"
 
 void fv1::initialise_Zstar
 (
@@ -90,9 +91,10 @@ void fv1::update_Hstar
 			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
 			NUMERIC_TYPE& Hstar_neg_x = Arrptr->Hstar_neg_x[k];
 			if (cell_mask != nullptr && cell_mask[k] == 0) { Hstar_neg_x = C(0.0); continue; }
-			const NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
+			const NUMERIC_TYPE H = Arrptr->H[k];
+                        const NUMERIC_TYPE Z = Arrptr->DEM[k];
 			const NUMERIC_TYPE Zstar_x = Arrptr->Zstar_x[j*(Parptr->xsz+1) + i+1];
-			Hstar_neg_x = getmax(C(0.0), ETA - Zstar_x);
+			Hstar_neg_x = getmax(C(0.0), H - (Zstar_x - Z));
 		}
 	}
 
@@ -104,9 +106,10 @@ void fv1::update_Hstar
 			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
 			NUMERIC_TYPE& Hstar_pos_x = Arrptr->Hstar_pos_x[k];
 			if (cell_mask != nullptr && cell_mask[k] == 0) { Hstar_pos_x = C(0.0); continue; }
-			const NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
+			const NUMERIC_TYPE H = Arrptr->H[k];
+                        const NUMERIC_TYPE Z = Arrptr->DEM[k];
 			const NUMERIC_TYPE Zstar_x = Arrptr->Zstar_x[j*(Parptr->xsz+1) + i];
-			Hstar_pos_x = getmax(C(0.0), ETA - Zstar_x);
+			Hstar_pos_x = getmax(C(0.0), H - (Zstar_x - Z));
 		}
 	}
 
@@ -118,9 +121,10 @@ void fv1::update_Hstar
 			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
 			NUMERIC_TYPE& Hstar_neg_y = Arrptr->Hstar_neg_y[k];
 			if (cell_mask != nullptr && cell_mask[k] == 0) { Hstar_neg_y = C(0.0); continue; }
-			const NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
+			const NUMERIC_TYPE H = Arrptr->H[k];
+                        const NUMERIC_TYPE Z = Arrptr->DEM[k];
 			const NUMERIC_TYPE Zstar_y = Arrptr->Zstar_y[j*(Parptr->xsz+1) + i];
-			Hstar_neg_y = getmax(C(0.0), ETA - Zstar_y);
+			Hstar_neg_y = getmax(C(0.0), H - (Zstar_y - Z));
 		}
 	}
 
@@ -132,9 +136,10 @@ void fv1::update_Hstar
 			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
 			NUMERIC_TYPE& Hstar_pos_y = Arrptr->Hstar_pos_y[k];
 			if (cell_mask != nullptr && cell_mask[k] == 0) { Hstar_pos_y = C(0.0); continue; }
-			const NUMERIC_TYPE ETA = eta(Parptr, Arrptr, i, j);
+			const NUMERIC_TYPE H = Arrptr->H[k];
+                        const NUMERIC_TYPE Z = Arrptr->DEM[k];
 			const NUMERIC_TYPE Zstar_y = Arrptr->Zstar_y[(j+1)*(Parptr->xsz+1) + i];
-			Hstar_pos_y = getmax(C(0.0), ETA - Zstar_y);
+			Hstar_pos_y = getmax(C(0.0), H - (Zstar_y - Z));
 		}
 	}
 }
@@ -348,7 +353,7 @@ NUMERIC_TYPE fv1::speed
 {
 	NUMERIC_TYPE H = Arrptr->H[j*Parptr->xsz + i];
 
-	if (H > Solverptr->DepthThresh)
+	if (surface_momentum_wet(Solverptr,j*Parptr->xsz+i,H,Arrptr->HU[j*Parptr->xsz+i],Arrptr->HV[j*Parptr->xsz+i]))
 	{
 		NUMERIC_TYPE discharge = discharge_component[j*Parptr->xsz + i];
 		return discharge / H;

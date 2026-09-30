@@ -12,7 +12,9 @@ void HLL_x
 	NUMERIC_TYPE HV_pos,
 	NUMERIC_TYPE& H_flux,
 	NUMERIC_TYPE& HU_flux,
-	NUMERIC_TYPE& HV_flux
+	NUMERIC_TYPE& HV_flux,
+        NUMERIC_TYPE storage_neg = C(0.0),
+        NUMERIC_TYPE storage_pos = C(0.0)
 );
 
 void HLL_y
@@ -26,7 +28,9 @@ void HLL_y
 	NUMERIC_TYPE HV_pos,
 	NUMERIC_TYPE& H_flux,
 	NUMERIC_TYPE& HU_flux,
-	NUMERIC_TYPE& HV_flux
+	NUMERIC_TYPE& HV_flux,
+        NUMERIC_TYPE storage_neg = C(0.0),
+        NUMERIC_TYPE storage_pos = C(0.0)
 );
 
 void HLL
@@ -40,5 +44,7 @@ void HLL
 	NUMERIC_TYPE HV_pos,
 	NUMERIC_TYPE& H_flux,
 	NUMERIC_TYPE& HU_flux,
-	NUMERIC_TYPE& HV_flux
+	NUMERIC_TYPE& HV_flux,
+        NUMERIC_TYPE storage_neg = C(0.0),
+        NUMERIC_TYPE storage_pos = C(0.0)
 );

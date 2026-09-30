@@ -741,6 +741,7 @@ struct Solver{
 	NUMERIC_TYPE Verror;
 	NUMERIC_TYPE FArea; // Store flooded area
 	NUMERIC_TYPE DepthThresh, MomentumThresh, MaxHflow;
+    const NUMERIC_TYPE* storage_depth = nullptr; // Optional surface activity depth [m].
 	NUMERIC_TYPE dhlin;
 	NUMERIC_TYPE htol;
 	NUMERIC_TYPE Qlimfact; // MT added to allow user to relax Qlimit
@@ -754,7 +755,8 @@ struct Solver{
 	int fricSolver2D; //GAMA: Solves the friction term using the vectorial (2D) scheme
 	NUMERIC_TYPE maxH; /**< maximum H in the domain at the current time */
 	NUMERIC_TYPE krivodonova_threshold; /**< DG2 slope detector */
-	NUMERIC_TYPE SpeedThresh; /**< FV1/DG2 threshold for friction application */
+	int manning_scheme = 0; /**< 0: FV1 linearized; 1: ANUGA-style damping (surface FV1) */
+    NUMERIC_TYPE SpeedThresh; /**< FV1/DG2 threshold for friction application */
     NUMERIC_TYPE DG2DepthThresh; /**< Threshold above which DG2 L1 operator is activated */
     NUMERIC_TYPE DG2ThinDepthTstep; /**< Tstep assigned to cells with thin depths */
 

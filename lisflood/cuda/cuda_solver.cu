@@ -1,4 +1,6 @@
 #include "cuda_solver.cuh"
+#include "cuda_activity.cuh"
+__constant__ const NUMERIC_TYPE* lis::cuda::storage_depth_grid;
 #include "cuda_atomic.cuh"
 
 __constant__ Geometry lis::cuda::geometry;

@@ -35,6 +35,9 @@ struct SparseFace
 	NUMERIC_TYPE p1;
 	NUMERIC_TYPE p2;
 	NUMERIC_TYPE p3;
+	NUMERIC_TYPE p4;
+	NUMERIC_TYPE p5;
+	NUMERIC_TYPE p6;
 };
 
 struct SparseFaceFlux

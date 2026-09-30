@@ -337,7 +337,7 @@ __device__ lis::cuda::FlowVector lis::cuda::Boundary::outside_x
 	NUMERIC_TYPE Zstar
 )
 {
-	FlowVector U_outside = { U_const.H, U_const.HU, U_const.HV }; 
+	FlowVector U_outside = { U_const.H, U_const.HU, U_const.HV, U_const.storage_depth };
 
 	switch (cuda::boundaries.BC_type[bc_i])
 	{
@@ -384,12 +384,12 @@ __device__ lis::cuda::FlowVector lis::cuda::Boundary::outside_y
 	NUMERIC_TYPE Zstar
 )
 {
-	FlowVector U_const_rotated = { U_const.H, U_const.HV, U_const.HU };
-	FlowVector U_inside_rotated = { U_inside.H, U_inside.HV, U_inside.HU };
+	FlowVector U_const_rotated = { U_const.H, U_const.HV, U_const.HU, U_const.storage_depth };
+	FlowVector U_inside_rotated = { U_inside.H, U_inside.HV, U_inside.HU, U_inside.storage_depth };
 	FlowVector U_outside = Boundary::outside_x(U_const_rotated,
 			U_inside_rotated, bc_i, HU_sign, Zstar);
 
-	return { U_outside.H, U_outside.HV, U_outside.HU };
+	return { U_outside.H, U_outside.HV, U_outside.HU, U_outside.storage_depth };
 }
 
 __device__ lis::cuda::FlowVector lis::cuda::Boundary::inside_x
@@ -411,7 +411,7 @@ __device__ lis::cuda::FlowVector lis::cuda::Boundary::inside_x
 		break;
 	case QFIX4:
 	case QVAR5:
-		return { U_outside.H, U_outside.HU, U_const.HV };
+		return { U_outside.H, U_outside.HU, U_const.HV, U_const.storage_depth };
 	}
 
 	return U_const;
@@ -425,11 +425,11 @@ __device__ lis::cuda::FlowVector lis::cuda::Boundary::inside_y
 	int bc_i
 )
 {
-	FlowVector U_outside_rotated = { U_outside.H, U_outside.HV, U_outside.HU };
-	FlowVector U_const_rotated = { U_const.H, U_const.HV, U_const.HU };
-	FlowVector U_inside_rotated = { U_inside.H, U_inside.HV, U_inside.HU };
+	FlowVector U_outside_rotated = { U_outside.H, U_outside.HV, U_outside.HU, U_outside.storage_depth };
+	FlowVector U_const_rotated = { U_const.H, U_const.HV, U_const.HU, U_const.storage_depth };
+	FlowVector U_inside_rotated = { U_inside.H, U_inside.HV, U_inside.HU, U_inside.storage_depth };
 	U_inside = Boundary::inside_x(U_outside_rotated, U_const_rotated, U_inside_rotated, bc_i);
-	return { U_inside.H, U_inside.HV, U_inside.HU };
+	return { U_inside.H, U_inside.HV, U_inside.HU, U_inside.storage_depth };
 }
 
 __device__ int lis::cuda::Boundary::index_w

@@ -1,5 +1,6 @@
 #include "cuda_hll.cuh"
 #include "cuda_solver.cuh"
+#include "../swe/wet_dry.h"
 
 __device__ lis::cuda::FlowVector lis::cuda::HLL::y
 (
@@ -7,8 +8,8 @@ __device__ lis::cuda::FlowVector lis::cuda::HLL::y
 	const FlowVector& u_pos
 )
 {
-	FlowVector u_neg_rotated = { u_neg.H, u_neg.HV, -u_neg.HU };
-	FlowVector u_pos_rotated = { u_pos.H, u_pos.HV, -u_pos.HU };
+	FlowVector u_neg_rotated = { u_neg.H, u_neg.HV, -u_neg.HU, u_neg.storage_depth };
+	FlowVector u_pos_rotated = { u_pos.H, u_pos.HV, -u_pos.HU, u_pos.storage_depth };
 
 	FlowVector F_rotated = HLL::x(u_neg_rotated, u_pos_rotated);
 
@@ -21,15 +22,16 @@ __device__ lis::cuda::FlowVector lis::cuda::HLL::x
 	const FlowVector& u_pos
 )
 {
-	if (u_neg.H <= cuda::solver_params.DepthThresh &&
-			u_pos.H <= cuda::solver_params.DepthThresh)
+	const bool wet_neg = momentum_wet(u_neg.H, u_neg.HU, u_neg.HV, cuda::solver_params.DepthThresh, u_neg.storage_depth);
+	const bool wet_pos = momentum_wet(u_pos.H, u_pos.HU, u_pos.HV, cuda::solver_params.DepthThresh, u_pos.storage_depth);
+	if (!wet_neg && !wet_pos)
 	{
 		return FlowVector();
 	}
 
 	NUMERIC_TYPE U_neg = C(0.0);
 	NUMERIC_TYPE V_neg = C(0.0);
-	if (u_neg.H > cuda::solver_params.DepthThresh)
+	if (wet_neg)
 	{
 		const NUMERIC_TYPE inv_H_neg = C(1.0) / u_neg.H;
 		U_neg = u_neg.HU * inv_H_neg;
@@ -38,7 +40,7 @@ __device__ lis::cuda::FlowVector lis::cuda::HLL::x
 
 	NUMERIC_TYPE U_pos = C(0.0);
 	NUMERIC_TYPE V_pos = C(0.0);
-	if (u_pos.H > cuda::solver_params.DepthThresh)
+	if (wet_pos)
 	{
 		const NUMERIC_TYPE inv_H_pos = C(1.0) / u_pos.H;
 		U_pos = u_pos.HU * inv_H_pos;
@@ -54,7 +56,7 @@ __device__ lis::cuda::FlowVector lis::cuda::HLL::x
 	const NUMERIC_TYPE A_star = FABS(q_star);
 
 	NUMERIC_TYPE S_neg;
-	if (u_neg.H <= cuda::solver_params.DepthThresh)
+	if (!wet_neg)
 	{
 		S_neg = U_pos - C(2.0) * A_pos;
 	}
@@ -64,7 +66,7 @@ __device__ lis::cuda::FlowVector lis::cuda::HLL::x
 	}
 
 	NUMERIC_TYPE S_pos;
-	if (u_pos.H <= cuda::solver_params.DepthThresh)
+	if (!wet_pos)
 	{
 		S_pos = U_neg + C(2.0) * A_neg;
 	}

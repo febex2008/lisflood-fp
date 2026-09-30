@@ -11,6 +11,7 @@ struct FlowVector
 	NUMERIC_TYPE H;
 	NUMERIC_TYPE HU;
 	NUMERIC_TYPE HV;
+        NUMERIC_TYPE storage_depth; // State metadata; flux vectors ignore it.
 
 	__device__ FlowVector star
 	(

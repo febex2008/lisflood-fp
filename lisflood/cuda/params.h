@@ -9,6 +9,7 @@ typedef struct SolverParams
 	NUMERIC_TYPE max_dt;
 	NUMERIC_TYPE DepthThresh;
 	NUMERIC_TYPE SpeedThresh;
+    int manning_scheme;
 	NUMERIC_TYPE KrivodonovaThresh;
 	NUMERIC_TYPE MaxHflow; 
 	int routing; 
@@ -31,6 +32,7 @@ typedef struct SolverParams
 	max_dt(solver.InitTstep),
 	DepthThresh(solver.DepthThresh),
 	SpeedThresh(solver.SpeedThresh),
+        manning_scheme(solver.manning_scheme),
 	KrivodonovaThresh(solver.krivodonova_threshold),
 	MaxHflow(solver.MaxHflow), 
 		routing(states.routing), 

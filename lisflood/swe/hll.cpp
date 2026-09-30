@@ -1,4 +1,5 @@
 #include "hll.h"
+#include "wet_dry.h"
 #include "flux.h"
 #include <cmath>
 #include <algorithm>
@@ -14,11 +15,13 @@ void HLL_x
 	NUMERIC_TYPE HV_pos,
 	NUMERIC_TYPE& H_flux,
 	NUMERIC_TYPE& HU_flux,
-	NUMERIC_TYPE& HV_flux
+	NUMERIC_TYPE& HV_flux,
+        NUMERIC_TYPE storage_neg,
+        NUMERIC_TYPE storage_pos
 )
 {
 	HLL(Solverptr, H_neg, HU_neg, HV_neg, H_pos, HU_pos, HV_pos,
-			H_flux, HU_flux, HV_flux);
+			H_flux, HU_flux, HV_flux, storage_neg, storage_pos);
 }
 
 void HLL_y
@@ -32,11 +35,13 @@ void HLL_y
 	NUMERIC_TYPE HV_pos,
 	NUMERIC_TYPE& H_flux,
 	NUMERIC_TYPE& HU_flux,
-	NUMERIC_TYPE& HV_flux
+	NUMERIC_TYPE& HV_flux,
+        NUMERIC_TYPE storage_neg,
+        NUMERIC_TYPE storage_pos
 )
 {
 	HLL(Solverptr, H_neg, HV_neg, -HU_neg, H_pos, HV_pos, -HU_pos,
-			H_flux, HV_flux, HU_flux);
+			H_flux, HV_flux, HU_flux, storage_neg, storage_pos);
 	HU_flux = -HU_flux;
 }
 
@@ -51,10 +56,11 @@ void HLL
 	NUMERIC_TYPE HV_pos,
 	NUMERIC_TYPE& H_flux,
 	NUMERIC_TYPE& HU_flux,
-	NUMERIC_TYPE& HV_flux
+	NUMERIC_TYPE& HV_flux,
+        NUMERIC_TYPE storage_neg,
+        NUMERIC_TYPE storage_pos
 )
 {
-	NUMERIC_TYPE DepthThresh = Solverptr->DepthThresh;
 	NUMERIC_TYPE g = Solverptr->g;
 
 #include "hll_include.h"
