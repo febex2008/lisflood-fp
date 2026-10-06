@@ -108,6 +108,26 @@ void lis::cuda::Topography::initialise_Zstar_y
 	lis::cuda::fv1::initialise_Zstar_y<<<1, cuda::block_size>>>(Zstar_y, DEM);
 }
 
+void lis::cuda::Topography::initialise_Zstar_x
+(
+	NUMERIC_TYPE* __restrict__ Zstar_x,
+	const NUMERIC_TYPE* __restrict__ DEM,
+	const int*
+)
+{
+	initialise_Zstar_x(Zstar_x, DEM);
+}
+
+void lis::cuda::Topography::initialise_Zstar_y
+(
+	NUMERIC_TYPE* __restrict__ Zstar_y,
+	const NUMERIC_TYPE* __restrict__ DEM,
+	const int*
+)
+{
+	initialise_Zstar_y(Zstar_y, DEM);
+}
+
 void lis::cuda::Topography::clamp_boundary_values
 (
 	NUMERIC_TYPE* DEM,
