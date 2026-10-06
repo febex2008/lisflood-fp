@@ -47,6 +47,15 @@ struct SparseFaceFlux
 	FlowVector desired_pos;
 };
 
+struct SourceTerms
+{
+	const NUMERIC_TYPE* hydrology = nullptr;
+	const int* point_head = nullptr;
+	const int* point_next = nullptr;
+	NUMERIC_TYPE rain = C(0.0);
+	NUMERIC_TYPE cell_area = C(0.0);
+};
+
 class Solver : public cuda::Solver<Flow>
 {
 public:
@@ -89,6 +98,18 @@ public:
 	(
 		MassStats* mass_stats,
 		cudaStream_t stream
+	);
+	Flow& update_flow_variables
+	(
+		MassStats* mass_stats,
+		cudaStream_t stream,
+		bool sources_and_friction_prepared
+	);
+
+	void apply_sources_and_friction
+	(
+		const SourceTerms& sources,
+		cudaStream_t stream = 0
 	);
 
 	Flow& d_U();
