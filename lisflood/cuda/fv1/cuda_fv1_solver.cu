@@ -390,6 +390,56 @@ void update_uniform_rain_func
 	}
 }
 
+__global__ void apply_source_terms(
+	Flow U,
+	NUMERIC_TYPE* DEM,
+	const SourceTerms sources,
+	const int* cell_mask
+)
+{
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	int j = blockIdx.y * blockDim.y + threadIdx.y;
+	if (i >= cuda::geometry.xsz || j >= cuda::geometry.ysz) return;
+
+	const int k = j * cuda::geometry.xsz + i;
+	const int cls = cell_mask == nullptr ? 1 : cell_mask[k];
+	if (cls == 0) return;
+	const int g = (j + 1) * cuda::pitch + (i + 1);
+
+	if (sources.hydrology != nullptr)
+		U.H[g] += sources.hydrology[k] * cuda::dt;
+
+	if (sources.rain > C(0.0) && cls != 2 &&
+		FABS(DEM[g] - cuda::solver_params.nodata_elevation) >= C(1e-6))
+		U.H[g] += sources.rain * cuda::dt;
+
+	if (sources.point_head != nullptr && sources.point_next != nullptr)
+	{
+		const NUMERIC_TYPE area = sources.cell_area > C(0.0)
+			? sources.cell_area : cuda::geometry.dx * cuda::geometry.dy;
+		for (int n = sources.point_head[k]; n >= 0; n = sources.point_next[n])
+		{
+			const ESourceType type = cuda::boundaries.PS_type[n];
+			const NUMERIC_TYPE value = cuda::boundaries.PS_value[n];
+			if (type == QFIX4 || type == QVAR5)
+			{
+				const NUMERIC_TYPE discharge = value * cuda::geometry.dx;
+				U.H[g] += discharge * cuda::dt / area;
+			}
+			else if (type == HFIX2 || type == HVAR3)
+			{
+				const NUMERIC_TYPE next_h = FMAX(C(0.0), value - DEM[g]);
+				U.H[g] = next_h;
+				if (next_h == C(0.0))
+				{
+					U.HU[g] = C(0.0);
+					U.HV[g] = C(0.0);
+				}
+			}
+		}
+	}
+}
+
 __global__ void update_ghost_cells
 (
 	Flow U,
@@ -865,13 +915,39 @@ void lis::cuda::fv1::Solver::set_cell_mask(const int* mask)
 	cell_mask = mask;
 }
 
+void lis::cuda::fv1::Solver::apply_sources_and_friction
+(
+	const SourceTerms& sources,
+	cudaStream_t stream
+)
+{
+	apply_source_terms<<<grid_size, cuda::block_size, 0, stream>>>(
+		Uold, DEM, sources, cell_mask);
+	if (friction)
+		apply_friction<<<grid_size, cuda::block_size, 0, stream>>>(
+			Uold, manning, cell_mask);
+	// Sources and friction modify the interior state used to construct
+	// boundary ghost states for the following FV1 flux update.
+	update_ghost_cells(stream);
+}
+
 lis::cuda::fv1::Flow& lis::cuda::fv1::Solver::update_flow_variables
 (
 	MassStats* mass_stats,
 	cudaStream_t stream
 )
 {
-	if (friction)
+	return update_flow_variables(mass_stats, stream, false);
+}
+
+lis::cuda::fv1::Flow& lis::cuda::fv1::Solver::update_flow_variables
+(
+	MassStats* mass_stats,
+	cudaStream_t stream,
+	bool sources_and_friction_prepared
+)
+{
+	if (!sources_and_friction_prepared && friction)
 	{
 		apply_friction<<<grid_size, cuda::block_size, 0, stream>>>(Uold, manning, cell_mask);
 		update_ghost_cells(stream);
