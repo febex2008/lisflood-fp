@@ -51,6 +51,59 @@ __global__ void initialise_Zstar_y
 	}
 }
 
+__global__ void apply_mask_to_Zstar_x
+(
+	NUMERIC_TYPE* __restrict__ Zstar_x,
+	const NUMERIC_TYPE* __restrict__ DEM,
+	const int* __restrict__ cell_mask
+)
+{
+	int global_i = blockIdx.x*blockDim.x + threadIdx.x;
+	int global_j = blockIdx.y*blockDim.y + threadIdx.y;
+
+	for (int j=global_j+1; j<cuda::geometry.ysz+1; j+=blockDim.y*gridDim.y)
+	{
+		for (int i=global_i+1; i<cuda::geometry.xsz; i+=blockDim.x*gridDim.x)
+		{
+			const int neg_k = (j-1)*cuda::geometry.xsz + (i-1);
+			const int pos_k = neg_k + 1;
+			const bool neg_active = cell_mask[neg_k] != 0;
+			const bool pos_active = cell_mask[pos_k] != 0;
+			if (neg_active == pos_active) continue;
+
+			const int g = j*cuda::pitch + i;
+			Zstar_x[g] = neg_active ? DEM[g] : DEM[g+1];
+		}
+	}
+}
+
+__global__ void apply_mask_to_Zstar_y
+(
+	NUMERIC_TYPE* __restrict__ Zstar_y,
+	const NUMERIC_TYPE* __restrict__ DEM,
+	const int* __restrict__ cell_mask
+)
+{
+	int global_i = blockIdx.x*blockDim.x + threadIdx.x;
+	int global_j = blockIdx.y*blockDim.y + threadIdx.y;
+
+	for (int j=global_j+1; j<cuda::geometry.ysz; j+=blockDim.y*gridDim.y)
+	{
+		for (int i=global_i+1; i<cuda::geometry.xsz+1; i+=blockDim.x*gridDim.x)
+		{
+			const int pos_k = (j-1)*cuda::geometry.xsz + (i-1);
+			const int neg_k = pos_k + cuda::geometry.xsz;
+			const bool pos_active = cell_mask[pos_k] != 0;
+			const bool neg_active = cell_mask[neg_k] != 0;
+			if (neg_active == pos_active) continue;
+
+			const int g = j*cuda::pitch + i;
+			Zstar_y[g] = neg_active ? DEM[g+cuda::pitch] : DEM[g];
+		}
+	}
+}
+
+
 }
 }
 }
@@ -112,20 +165,26 @@ void lis::cuda::Topography::initialise_Zstar_x
 (
 	NUMERIC_TYPE* __restrict__ Zstar_x,
 	const NUMERIC_TYPE* __restrict__ DEM,
-	const int*
+	const int* cell_mask
 )
 {
 	initialise_Zstar_x(Zstar_x, DEM);
+	if (cell_mask != nullptr)
+		lis::cuda::fv1::apply_mask_to_Zstar_x<<<1, cuda::block_size>>>(
+			Zstar_x, DEM, cell_mask);
 }
 
 void lis::cuda::Topography::initialise_Zstar_y
 (
 	NUMERIC_TYPE* __restrict__ Zstar_y,
 	const NUMERIC_TYPE* __restrict__ DEM,
-	const int*
+	const int* cell_mask
 )
 {
 	initialise_Zstar_y(Zstar_y, DEM);
+	if (cell_mask != nullptr)
+		lis::cuda::fv1::apply_mask_to_Zstar_y<<<1, cuda::block_size>>>(
+			Zstar_y, DEM, cell_mask);
 }
 
 void lis::cuda::Topography::clamp_boundary_values
