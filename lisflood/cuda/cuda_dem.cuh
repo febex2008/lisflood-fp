@@ -26,13 +26,27 @@ struct Topography
 		const NUMERIC_TYPE* __restrict__ DEM
 	);
 
-	static void initialise_Zstar_y
+	
+	static void initialise_Zstar_x
+	(
+		NUMERIC_TYPE* __restrict__ Zstar_x,
+		const NUMERIC_TYPE* __restrict__ DEM,
+		const int* cell_mask
+	);
+static void initialise_Zstar_y
 	(
 		NUMERIC_TYPE* __restrict__ Zstar_y,
 		const NUMERIC_TYPE* __restrict__ DEM
 	);
 
-	static void clamp_boundary_values
+	
+	static void initialise_Zstar_y
+	(
+		NUMERIC_TYPE* __restrict__ Zstar_y,
+		const NUMERIC_TYPE* __restrict__ DEM,
+		const int* cell_mask
+	);
+static void clamp_boundary_values
 	(
 		NUMERIC_TYPE* DEM,
 		Geometry& geometry,
