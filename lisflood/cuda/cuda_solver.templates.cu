@@ -13,6 +13,80 @@ namespace cuda
 {
 
 template<typename F>
+__global__ void prepare_step_state
+(
+	F U,
+	StepPreparation prep
+)
+{
+	const int k = blockIdx.x * blockDim.x + threadIdx.x;
+	const int cells = cuda::geometry.xsz * cuda::geometry.ysz;
+	if (k >= cells) return;
+	if (prep.mask != nullptr && prep.mask[k] == 0) return;
+
+	const int i = k % cuda::geometry.xsz;
+	const int j = k / cuda::geometry.xsz;
+	const int g = (j + 1) * cuda::pitch + (i + 1);
+
+	if (prep.fixed_stage != nullptr && prep.dem != nullptr)
+	{
+		const NUMERIC_TYPE stage = prep.fixed_stage[k];
+		if (isfinite(stage))
+		{
+			const NUMERIC_TYPE old_h = U.H[g];
+			const NUMERIC_TYPE new_h = FMAX(C(0.0), stage - prep.dem[g]);
+			U.H[g] = new_h;
+			if (new_h == C(0.0))
+			{
+				U.HU[g] = C(0.0);
+				U.HV[g] = C(0.0);
+			}
+			if (prep.boundary_volume != nullptr && prep.cell_area > C(0.0))
+			{
+				const NUMERIC_TYPE dv = (new_h - old_h) * prep.cell_area;
+				if (dv != C(0.0))
+					atomicAdd(prep.boundary_volume, static_cast<double>(dv));
+			}
+		}
+	}
+
+	if (U.H[g] < C(0.0))
+	{
+		if (prep.negative_volume != nullptr && prep.cell_area > C(0.0))
+			atomicAdd(prep.negative_volume, -U.H[g] * prep.cell_area);
+		U.H[g] = C(0.0);
+		U.HU[g] = C(0.0);
+		U.HV[g] = C(0.0);
+	}
+	else if (U.H[g] == C(0.0))
+	{
+		U.HU[g] = C(0.0);
+		U.HV[g] = C(0.0);
+	}
+
+	if (prep.sample != nullptr && *prep.sample != 0)
+	{
+		const NUMERIC_TYPE h = U.H[g];
+		if (prep.max_h != nullptr)
+			prep.max_h[k] = FMAX(prep.max_h[k], h);
+		if (prep.max_v != nullptr &&
+			momentum_wet(h, U.HU[g], U.HV[g], cuda::solver_params.DepthThresh,
+				cell_storage_depth(g)))
+		{
+			const NUMERIC_TYPE vx = U.HU[g] / h;
+			const NUMERIC_TYPE vy = U.HV[g] / h;
+			const NUMERIC_TYPE speed = SQRT(vx * vx + vy * vy);
+			if (speed > prep.max_v[k])
+			{
+				prep.max_v[k] = speed;
+				if (prep.peak_vx != nullptr) prep.peak_vx[k] = vx;
+				if (prep.peak_vy != nullptr) prep.peak_vy[k] = vy;
+			}
+		}
+	}
+}
+
+template<typename F>
 __global__ void update_dt_block_min
 (
 	NUMERIC_TYPE* block_min,
@@ -304,6 +378,22 @@ elements(lis::GhostRaster::elements_H(geometry))
 		dt_field = cuda::GhostRaster::allocate_device_H(geometry);
 
 
+}
+
+template<typename F>
+void lis::cuda::DynamicTimestep<F>::update_dt_async
+(
+	cudaStream_t stream,
+	const StepPreparation& preparation
+)
+{
+	auto& U = solver.d_U();
+	const int cells = xsz * ysz;
+	const int blocks = std::max(1, (cells + CUDA_BLOCK_SIZE - 1) / CUDA_BLOCK_SIZE);
+	lis::cuda::prepare_step_state<F><<<blocks, CUDA_BLOCK_SIZE, 0, stream>>>(
+		U, preparation);
+	checkCudaErrors(cudaPeekAtLastError());
+	update_dt_async(stream);
 }
 
 template<typename F>
