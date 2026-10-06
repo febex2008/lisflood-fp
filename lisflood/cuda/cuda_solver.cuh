@@ -42,6 +42,21 @@ struct CflDiagnosticRecord
 	NUMERIC_TYPE neighbour_HV[9];
 };
 
+struct StepPreparation
+{
+	const int* mask = nullptr;
+	const NUMERIC_TYPE* dem = nullptr;
+	const NUMERIC_TYPE* fixed_stage = nullptr;
+	NUMERIC_TYPE* negative_volume = nullptr;
+	double* boundary_volume = nullptr;
+	NUMERIC_TYPE cell_area = C(0.0);
+	NUMERIC_TYPE* max_h = nullptr;
+	NUMERIC_TYPE* max_v = nullptr;
+	NUMERIC_TYPE* peak_vx = nullptr;
+	NUMERIC_TYPE* peak_vy = nullptr;
+	const int* sample = nullptr;
+};
+
 __device__
 void update_mass_stats_x
 (
@@ -107,6 +122,7 @@ public:
 	);
 
 	void update_dt_async(cudaStream_t stream = 0);
+	void update_dt_async(cudaStream_t stream, const StepPreparation& preparation);
 	NUMERIC_TYPE update_dt();
 
 	void enable_diagnostics(int capacity);
