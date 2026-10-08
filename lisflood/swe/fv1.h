@@ -4,6 +4,14 @@
 
 namespace fv1
 {
+    struct CflSourcePrediction {
+        const double* hydrology = nullptr;
+        const double* cell_source = nullptr;
+        const double* swmm_source = nullptr;
+        const double* fixed_stage = nullptr;
+        const double* elevation = nullptr;
+        double prediction_dt = 0.0;
+    };
 	void solve
 	(
 		Fnames *Fnameptr,
@@ -89,7 +97,8 @@ namespace fv1
 		Pars *Parptr,
 		Solver *Solverptr,
 		Arrays *Arrptr,
-		const int *cell_mask = nullptr
+		const int *cell_mask = nullptr,
+        const CflSourcePrediction* source = nullptr
 	);
 
 	NUMERIC_TYPE bed_source_x
