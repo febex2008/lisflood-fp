@@ -87,23 +87,51 @@ __global__ void prepare_step_state
 }
 
 template<typename F>
+__device__ NUMERIC_TYPE predicted_cfl_depth(F U,int g,int k,StepPreparation p)
+{
+    NUMERIC_TYPE h=U.H[g];
+    if(!p.previous_cfl || p.growth_limit<=C(0.0)) return h;
+    const NUMERIC_TYPE dtp=FMAX(C(0.0),*p.previous_cfl)*p.growth_limit;
+    NUMERIC_TYPE rate=C(0.0);
+    if(p.hydrology) rate+=p.hydrology[k];
+    if(p.cell_source) rate+=p.cell_source[k];
+    const int cls=p.mask ? p.mask[k] : 1;
+    if(p.rainfall_rate>C(0.0) && cls!=2 &&
+       (!p.dem || FABS(p.dem[g]-cuda::solver_params.nodata_elevation)>=C(1e-6)))
+        rate+=p.rainfall_rate;
+    if(p.point_head && p.point_next) {
+        const NUMERIC_TYPE area=p.cell_area>C(0.0) ? p.cell_area :
+            cuda::geometry.dx*cuda::geometry.dy;
+        for(int n=p.point_head[k];n>=0;n=p.point_next[n]) {
+            const ESourceType type=cuda::boundaries.PS_type[n];
+            if(type==QFIX4 || type==QVAR5)
+                rate+=cuda::boundaries.PS_value[n]*cuda::geometry.dx/area;
+        }
+    }
+    return FMAX(C(0.0),h+dtp*rate);
+}
+
+template<typename F>
 __global__ void update_dt_block_min
 (
 	NUMERIC_TYPE* block_min,
-	F U
+	F U,
+    StepPreparation prep
 )
 {
 	__shared__ NUMERIC_TYPE shared_min[CUDA_BLOCK_SIZE];
 	const int tid = threadIdx.x;
 	const int i = blockIdx.x * blockDim.x + tid;
 	NUMERIC_TYPE local_min = cuda::solver_params.max_dt;
+    if(prep.previous_cfl && prep.growth_limit>C(0.0))
+        local_min=FMIN(local_min,*prep.previous_cfl*prep.growth_limit);
 
 	if (i < cuda::geometry.xsz)
 	{
 		for (int j = blockIdx.y; j < cuda::geometry.ysz; j += gridDim.y)
 		{
 			const int k = (j + 1) * cuda::pitch + (i + 1);
-			const NUMERIC_TYPE H = U.H[k];
+			const NUMERIC_TYPE H = predicted_cfl_depth(U,k,j*cuda::geometry.xsz+i,prep);
 			if (momentum_wet(H, U.HU[k], U.HV[k], cuda::solver_params.DepthThresh, cell_storage_depth(k)))
 			{
 				const NUMERIC_TYPE inv_H = C(1.0) / H;
@@ -136,7 +164,8 @@ __global__ void update_dt_block_min_diag
 (
 	NUMERIC_TYPE* block_min,
 	int* block_index,
-	F U
+	F U,
+    StepPreparation prep
 )
 {
 	__shared__ NUMERIC_TYPE shared_min[CUDA_BLOCK_SIZE];
@@ -144,6 +173,8 @@ __global__ void update_dt_block_min_diag
 	const int tid = threadIdx.x;
 	const int i = blockIdx.x * blockDim.x + tid;
 	NUMERIC_TYPE local_min = cuda::solver_params.max_dt;
+    if(prep.previous_cfl && prep.growth_limit>C(0.0))
+        local_min=FMIN(local_min,*prep.previous_cfl*prep.growth_limit);
 	int local_index = -1;
 
 	if (i < cuda::geometry.xsz)
@@ -151,7 +182,7 @@ __global__ void update_dt_block_min_diag
 		for (int j = blockIdx.y; j < cuda::geometry.ysz; j += gridDim.y)
 		{
 			const int k = (j + 1) * cuda::pitch + (i + 1);
-			const NUMERIC_TYPE H = U.H[k];
+			const NUMERIC_TYPE H = predicted_cfl_depth(U,k,j*cuda::geometry.xsz+i,prep);
 			if (momentum_wet(H, U.HU[k], U.HV[k], cuda::solver_params.DepthThresh, cell_storage_depth(k)))
 			{
 				const NUMERIC_TYPE inv_H = C(1.0) / H;
@@ -209,7 +240,8 @@ __global__ void record_cfl_diagnostic
 	F U,
 	CflDiagnosticRecord* records,
 	unsigned long long* record_count,
-	int capacity
+	int capacity,
+    StepPreparation prep
 )
 {
 	__shared__ NUMERIC_TYPE shared_min[CUDA_BLOCK_SIZE];
@@ -268,7 +300,7 @@ __global__ void record_cfl_diagnostic
 	const int i = rec.cell_index % cuda::geometry.xsz;
 	const int j = rec.cell_index / cuda::geometry.xsz;
 	const int k = (j + 1) * cuda::pitch + (i + 1);
-	rec.H = U.H[k];
+	rec.H = predicted_cfl_depth(U,k,rec.cell_index,prep);
 	rec.HU = U.HU[k];
 	rec.HV = U.HV[k];
 	if (momentum_wet(rec.H, rec.HU, rec.HV, cuda::solver_params.DepthThresh, cell_storage_depth(k)))
@@ -393,11 +425,17 @@ void lis::cuda::DynamicTimestep<F>::update_dt_async
 	lis::cuda::prepare_step_state<F><<<blocks, CUDA_BLOCK_SIZE, 0, stream>>>(
 		U, preparation);
 	checkCudaErrors(cudaPeekAtLastError());
-	update_dt_async(stream);
+	reduce_dt_async(stream, preparation);
 }
 
 template<typename F>
 void lis::cuda::DynamicTimestep<F>::update_dt_async(cudaStream_t stream)
+{
+    reduce_dt_async(stream, StepPreparation{});
+}
+
+template<typename F>
+void lis::cuda::DynamicTimestep<F>::reduce_dt_async(cudaStream_t stream,const StepPreparation& preparation)
 {
 	if (adaptive)
 	{
@@ -405,12 +443,12 @@ void lis::cuda::DynamicTimestep<F>::update_dt_async(cudaStream_t stream)
 		if (diagnostic_records != nullptr)
 		{
 			lis::cuda::update_dt_block_min_diag<F><<<reduction_grid, CUDA_BLOCK_SIZE, 0, stream>>>(
-					dt_field, diagnostic_index_field, U);
+					dt_field, diagnostic_index_field, U, preparation);
 		}
 		else
 		{
 			lis::cuda::update_dt_block_min<F><<<reduction_grid, CUDA_BLOCK_SIZE, 0, stream>>>(
-					dt_field, U);
+					dt_field, U, preparation);
 		}
 		checkCudaErrors(cudaPeekAtLastError());
 		checkCudaErrors(cub::DeviceReduce::Min(d_temp, bytes,
@@ -419,7 +457,7 @@ void lis::cuda::DynamicTimestep<F>::update_dt_async(cudaStream_t stream)
 		{
 			lis::cuda::record_cfl_diagnostic<F><<<1, CUDA_BLOCK_SIZE, 0, stream>>>(
 					dt_field, diagnostic_index_field, reduction_elements, U,
-					diagnostic_records, diagnostic_count, diagnostic_capacity);
+					diagnostic_records, diagnostic_count, diagnostic_capacity, preparation);
 			checkCudaErrors(cudaPeekAtLastError());
 		}
 	}
