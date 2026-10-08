@@ -652,40 +652,43 @@ void fv1::set_boundary_values
 	}
 }
 
-NUMERIC_TYPE fv1::Tstep_from_cfl
-(
-	Pars *Parptr,
-	Solver *Solverptr,
-	Arrays *Arrptr,
-	const int *cell_mask
-)
+NUMERIC_TYPE fv1::Tstep_from_cfl(
+    Pars *Parptr, Solver *Solverptr, Arrays *Arrptr,
+    const int *cell_mask, const CflSourcePrediction* source)
 {
-	NUMERIC_TYPE dt = Solverptr->InitTstep;
+    NUMERIC_TYPE dt=Solverptr->InitTstep;
+    const double prediction_dt=source ? source->prediction_dt : 0.;
+    if(prediction_dt>0.) dt=(std::min)(dt,static_cast<NUMERIC_TYPE>(prediction_dt));
 #ifndef _MSC_VER
 #pragma omp parallel for reduction(min:dt)
 #endif
-	for (int j=0; j<Parptr->ysz; j++)
-	{
-		for(int i=0; i<Parptr->xsz; i++)
-		{
-			const size_t k = static_cast<size_t>(j)*Parptr->xsz + i;
-			if (cell_mask != nullptr && cell_mask[k] == 0) continue;
-			NUMERIC_TYPE H = Arrptr->H[k];
-			if (surface_momentum_wet(Solverptr,k,H,Arrptr->HU[k],Arrptr->HV[k]))
-			{
-				NUMERIC_TYPE HU = Arrptr->HU[j*Parptr->xsz + i];
-				NUMERIC_TYPE HV = Arrptr->HV[j*Parptr->xsz + i];
-				NUMERIC_TYPE U = HU/H;
-				NUMERIC_TYPE V = HV/H;
-				
-				NUMERIC_TYPE dt_x = Solverptr->cfl*Parptr->dx
-					/ (FABS(U)+SQRT(Solverptr->g*H));
-				NUMERIC_TYPE dt_y = Solverptr->cfl*Parptr->dy
-					/ (FABS(V)+SQRT(Solverptr->g*H));
-
-				dt = (std::min)({dt, dt_x, dt_y});
-			}
-		}
-	}
-	return dt;
+    for(int j=0;j<Parptr->ysz;++j)
+        for(int i=0;i<Parptr->xsz;++i) {
+            const size_t k=static_cast<size_t>(j)*Parptr->xsz+i;
+            if(cell_mask && cell_mask[k]==0) continue;
+            NUMERIC_TYPE H=Arrptr->H[k],HU=Arrptr->HU[k],HV=Arrptr->HV[k];
+            if(source && prediction_dt>0.) {
+                const bool stage=source->fixed_stage && source->elevation &&
+                    std::isfinite(source->fixed_stage[k]);
+                if(stage) {
+                    H=static_cast<NUMERIC_TYPE>((std::max)(0.,
+                      source->fixed_stage[k]-source->elevation[k]));
+                    if(H==C(0.0)) HU=HV=C(0.0);
+                }
+                double rate=source->swmm_source ? source->swmm_source[k] : 0.;
+                if(!stage) {
+                    if(source->hydrology) rate+=source->hydrology[k];
+                    if(source->cell_source) rate+=source->cell_source[k];
+                }
+                H=static_cast<NUMERIC_TYPE>((std::max)(0.,static_cast<double>(H)+prediction_dt*rate));
+                if(H==C(0.0)) HU=HV=C(0.0);
+            }
+            if(surface_momentum_wet(Solverptr,k,H,HU,HV)) {
+                const NUMERIC_TYPE u=HU/H,v=HV/H,wave=SQRT(Solverptr->g*H);
+                const NUMERIC_TYPE dt_x=Solverptr->cfl*Parptr->dx/(FABS(u)+wave);
+                const NUMERIC_TYPE dt_y=Solverptr->cfl*Parptr->dy/(FABS(v)+wave);
+                dt=(std::min)({dt,dt_x,dt_y});
+            }
+        }
+    return dt;
 }
