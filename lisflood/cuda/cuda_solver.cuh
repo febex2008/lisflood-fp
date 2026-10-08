@@ -55,6 +55,14 @@ struct StepPreparation
 	NUMERIC_TYPE* peak_vx = nullptr;
 	NUMERIC_TYPE* peak_vy = nullptr;
 	const int* sample = nullptr;
+    // Inputs to the source-aware FV1 CFL reduction; depth is not modified.
+    const NUMERIC_TYPE* hydrology = nullptr;
+    const NUMERIC_TYPE* cell_source = nullptr;
+    const int* point_head = nullptr;
+    const int* point_next = nullptr;
+    const NUMERIC_TYPE* previous_cfl = nullptr;
+    NUMERIC_TYPE rainfall_rate = C(0.0);
+    NUMERIC_TYPE growth_limit = C(1.0);
 };
 
 __device__
@@ -136,6 +144,7 @@ public:
 	~DynamicTimestep();
 
 private:
+    void reduce_dt_async(cudaStream_t stream, const StepPreparation& preparation);
 	bool adaptive;
 	NUMERIC_TYPE& dt;
 	NUMERIC_TYPE max_dt;
