@@ -138,11 +138,9 @@ __global__ void update_dt_block_min
 				const NUMERIC_TYPE u = U.HU[k] * inv_H;
 				const NUMERIC_TYPE v = U.HV[k] * inv_H;
 				const NUMERIC_TYPE wave = SQRT(cuda::physical_params.g * H);
-				const NUMERIC_TYPE dt_x = cuda::solver_params.cfl * cuda::geometry.dx /
-					(FABS(u) + wave);
-				const NUMERIC_TYPE dt_y = cuda::solver_params.cfl * cuda::geometry.dy /
-					(FABS(v) + wave);
-				local_min = FMIN(local_min, FMIN(dt_x, dt_y));
+				const NUMERIC_TYPE rate_x = (FABS(u) + wave) / cuda::geometry.dx;
+				const NUMERIC_TYPE rate_y = (FABS(v) + wave) / cuda::geometry.dy;
+				local_min = FMIN(local_min, cuda::solver_params.cfl / (rate_x + rate_y));
 			}
 		}
 	}
@@ -189,11 +187,9 @@ __global__ void update_dt_block_min_diag
 				const NUMERIC_TYPE u = U.HU[k] * inv_H;
 				const NUMERIC_TYPE v = U.HV[k] * inv_H;
 				const NUMERIC_TYPE wave = SQRT(cuda::physical_params.g * H);
-				const NUMERIC_TYPE dt_x = cuda::solver_params.cfl * cuda::geometry.dx /
-					(FABS(u) + wave);
-				const NUMERIC_TYPE dt_y = cuda::solver_params.cfl * cuda::geometry.dy /
-					(FABS(v) + wave);
-				const NUMERIC_TYPE candidate = FMIN(dt_x, dt_y);
+				const NUMERIC_TYPE rate_x = (FABS(u) + wave) / cuda::geometry.dx;
+				const NUMERIC_TYPE rate_y = (FABS(v) + wave) / cuda::geometry.dy;
+				const NUMERIC_TYPE candidate = cuda::solver_params.cfl / (rate_x + rate_y);
 				const int physical_index = j * cuda::geometry.xsz + i;
 				if (candidate < local_min || (candidate == local_min &&
 					(local_index < 0 || physical_index < local_index)))

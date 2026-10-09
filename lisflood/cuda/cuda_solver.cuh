@@ -29,7 +29,7 @@ extern const dim3 block_size;
 struct CflDiagnosticRecord
 {
 	int cell_index;
-	int limiting_axis; /* 0=none/dry, 1=x, 2=y */
+	int limiting_axis; /* 0=none/dry, 1=x-dominant, 2=y-dominant; CFL combines x+y */
 	NUMERIC_TYPE cfl_dt;
 	NUMERIC_TYPE H;
 	NUMERIC_TYPE HU;

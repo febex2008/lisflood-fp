@@ -685,9 +685,11 @@ NUMERIC_TYPE fv1::Tstep_from_cfl(
             }
             if(surface_momentum_wet(Solverptr,k,H,HU,HV)) {
                 const NUMERIC_TYPE u=HU/H,v=HV/H,wave=SQRT(Solverptr->g*H);
-                const NUMERIC_TYPE dt_x=Solverptr->cfl*Parptr->dx/(FABS(u)+wave);
-                const NUMERIC_TYPE dt_y=Solverptr->cfl*Parptr->dy/(FABS(v)+wave);
-                dt=(std::min)({dt,dt_x,dt_y});
+                // An unsplit 2D flux update must satisfy the sum of both
+                // directional wave-speed contributions, not their minimum.
+                const NUMERIC_TYPE rate_x=(FABS(u)+wave)/Parptr->dx;
+                const NUMERIC_TYPE rate_y=(FABS(v)+wave)/Parptr->dy;
+                dt=(std::min)(dt,Solverptr->cfl/(rate_x+rate_y));
             }
         }
     return dt;

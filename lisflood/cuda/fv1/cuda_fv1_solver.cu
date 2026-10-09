@@ -336,12 +336,10 @@ __global__ void update_dt_per_element
 				NUMERIC_TYPE U = HU/H;
 				NUMERIC_TYPE V = HV/H;
 				
-				NUMERIC_TYPE dt_x = cuda::solver_params.cfl * cuda::geometry.dx
-					/ (FABS(U)+SQRT(cuda::physical_params.g * H));
-				NUMERIC_TYPE dt_y = cuda::solver_params.cfl * cuda::geometry.dy
-					/ (FABS(V)+SQRT(cuda::physical_params.g * H));
-
-				dt[j*cuda::pitch + i] = FMIN(dt_x, dt_y);
+				const NUMERIC_TYPE wave = SQRT(cuda::physical_params.g * H);
+				const NUMERIC_TYPE rate_x = (FABS(U) + wave) / cuda::geometry.dx;
+				const NUMERIC_TYPE rate_y = (FABS(V) + wave) / cuda::geometry.dy;
+				dt[j*cuda::pitch + i] = cuda::solver_params.cfl / (rate_x + rate_y);
 			}
 			else
 			{
